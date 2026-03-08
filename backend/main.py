@@ -529,7 +529,10 @@ async def create_test_task(task: Task):
 
 @api_router.post("/signup")
 async def signup(user: SignupRequest):
+    logger.info(f"Signup attempt for email: {user.email}")
+    
     if await users.find_one({"email": user.email}):
+        logger.warning(f"Email already registered: {user.email}")
         raise HTTPException(status_code=400, detail="Email already registered")
 
     token = generate_verification_token()
@@ -543,6 +546,7 @@ async def signup(user: SignupRequest):
     }
 
     await users.insert_one(new_user)
+    logger.info(f"User created: {user.email}")
 
     send_verification_email(user.email, token)
 
@@ -550,15 +554,20 @@ async def signup(user: SignupRequest):
 
 @api_router.post("/login")
 async def login(user: LoginRequest):
+    logger.info(f"Login attempt for email: {user.email}")
+    
     db_user = await users.find_one({"email": user.email})
 
     if not db_user:
+        logger.warning(f"User not found: {user.email}")
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     if not db_user["is_verified"]:
+        logger.warning(f"Email not verified: {user.email}")
         raise HTTPException(status_code=403, detail="Email not verified")
 
     if not verify_password(user.password, db_user["hashed_password"]):
+        logger.warning(f"Invalid password for: {user.email}")
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
     token = create_access_token({
@@ -566,6 +575,7 @@ async def login(user: LoginRequest):
         "email": db_user["email"]
     })
 
+    logger.info(f"Login successful: {user.email}")
     return {
         "access_token": token,
         "token_type": "bearer"
@@ -742,7 +752,7 @@ async def get_user_accuracy(user_id: str):
 # Include router FIRST
 app.include_router(api_router)
 
-# ✅ CORS CONFIGURATION
+# ✅ CORS CONFIGURATION - UPDATED
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -756,10 +766,28 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# ✅ Add CORS middleware for preflight requests
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "https://timevorai.netlify.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
 # ✅ OPTIONS handler for all routes
 @app.options("/{path:path}")
 async def options_handler():
-    return {}
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "https://timevorai.netlify.app",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Credentials": "true",
+        }
+    )
 
 # -------------------- RUN --------------------
 
