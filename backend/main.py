@@ -19,7 +19,7 @@ from security import generate_verification_token
 from email_service import send_verification_email
 from jwt_service import create_access_token
 from core.dependencies import get_current_user
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 
 # Import AI Assistant
 from ai_assistant import AIAssistant, get_ai_context
@@ -35,99 +35,87 @@ import os
 import uuid
 import logging
 import json
+import traceback
 
-# -------------------- TIMEVORA AI BRAIN --------------------
+# -------------------- SETUP LOGGING --------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-TIMEVORA_SYSTEM_PROMPT = """
-You are Timevora AI — an elite productivity planner and cognitive performance coach.
-
-Your responsibilities:
-- Detect overload and burnout risk
-- Detect unrealistic time estimates
-- Suggest smarter schedules
-- Recommend best times of day for tasks
-- Encourage healthy productivity
-
-Rules:
-- If overloaded, suggest moving tasks
-- If underestimation detected, explain why
-- Be concise, friendly, and practical
-- Speak like a smart assistant, not a robot
-"""
-
-def timevora_ai(planning_data: dict) -> str:
-    total = planning_data["totalLoad"]
-    overloaded = planning_data["overloaded"]
-
-    hard_tasks = [
-        t["name"] for t in planning_data["tasks"]
-        if t["difficulty"] == "hard"
-    ]
-
-    response = []
-
-    if overloaded:
-        response.append(
-            "Your workload is too heavy for one day. I recommend moving some tasks to tomorrow to avoid burnout."
-        )
-
-    if hard_tasks:
-        response.append(
-            f"Focus on hard tasks like {', '.join(hard_tasks[:2])} in the morning when your energy is highest."
-        )
-
-    if total < 3:
-        response.append("You can handle more today if you feel productive.")
-
-    return " ".join(response) or "Your schedule looks balanced and realistic. Great job planning today!"
-
-async def get_user_accuracy(user_id: str):
-    records = []
-
-    async for r in task_history.find({"user_id": user_id}):
-        records.append(r)
-
-    if not records:
-        return {"easy": 1, "medium": 1, "hard": 1}
-
-    stats = {"easy": [], "medium": [], "hard": []}
-
-    for r in records:
-        ratio = r["actualTime"] / r["aiTime"]
-        stats[r["difficulty"]].append(ratio)
-
-    return {
-        k: round(sum(v) / len(v), 2) if v else 1
-        for k, v in stats.items()
-    }
-
-# Load .env
+# -------------------- LOAD ENV --------------------
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 # -------------------- MONGODB --------------------
 import certifi
 
-mongo_url = os.environ["MONGO_URL"]
-
-client = AsyncIOMotorClient(
-    mongo_url,
-    tls=True,
-    tlsCAFile=certifi.where()
-)
-
-db = client[os.environ["DB_NAME"]]
-
-users = db.users
-tasks = db.tasks
-status_checks = db.status_checks
-task_history = db.task_history
-daily_plans = db.daily_plans
+try:
+    mongo_url = os.environ.get("MONGO_URL")
+    if not mongo_url:
+        logger.error("MONGO_URL environment variable not set!")
+        raise ValueError("MONGO_URL not set")
+    
+    logger.info(f"Connecting to MongoDB...")
+    
+    client = AsyncIOMotorClient(
+        mongo_url,
+        tls=True,
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=5000
+    )
+    
+    db = client[os.environ.get("DB_NAME", "timevora")]
+    
+    users = db.users
+    tasks = db.tasks
+    status_checks = db.status_checks
+    task_history = db.task_history
+    daily_plans = db.daily_plans
+    
+    logger.info("✅ MongoDB client created successfully")
+    
+except Exception as e:
+    logger.error(f"❌ MongoDB connection failed: {str(e)}")
+    logger.error(traceback.format_exc())
 
 # -------------------- APP --------------------
 
-app = FastAPI()
+app = FastAPI(title="Timevora API", description="Timevora Backend API", version="1.0.0")
 api_router = APIRouter(prefix="/api")
+
+# -------------------- ROOT ENDPOINTS --------------------
+
+@app.get("/")
+async def root():
+    """Root endpoint to verify API is running"""
+    return {
+        "message": "Timevora API is running",
+        "status": "healthy",
+        "version": "1.0.0",
+        "endpoints": {
+            "api_root": "/api/",
+            "docs": "/docs",
+            "redoc": "/redoc"
+        }
+    }
+
+@app.head("/")
+async def root_head():
+    """HEAD request handler for root endpoint - helps with Render health checks"""
+    return JSONResponse(content={}, status_code=200)
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mongodb": "connected" if 'client' in locals() else "disconnected"
+    }
+
+@app.head("/health")
+async def health_head():
+    """HEAD request handler for health endpoint"""
+    return JSONResponse(content={}, status_code=200)
 
 # -------------------- MODELS --------------------
 
@@ -189,11 +177,34 @@ class NotificationRequest(BaseModel):
     icon: Optional[str] = None
     data: Optional[dict] = None
 
-# -------------------- STATUS ROUTES --------------------
+# -------------------- API ROUTES --------------------
 
 @api_router.get("/")
-async def root():
-    return {"message": "API running"}
+async def api_root():
+    """API root endpoint"""
+    return {
+        "message": "API running",
+        "endpoints": [
+            "/api/status",
+            "/api/tasks",
+            "/api/signup",
+            "/api/login",
+            "/api/ai-insight",
+            "/api/analyze-day",
+            "/api/task-feedback",
+            "/api/daily-plans",
+            "/api/accuracy",
+            "/api/productivity-score",
+            "/api/ai-assistant/chat",
+            "/api/ml/patterns",
+            "/api/analytics"
+        ]
+    }
+
+@api_router.get("/status")
+async def get_status():
+    """Simple status check"""
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 @api_router.post("/status", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
@@ -205,7 +216,7 @@ async def create_status_check(input: StatusCheckCreate):
     await status_checks.insert_one(doc)
     return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
+@api_router.get("/status/all", response_model=List[StatusCheck])
 async def get_status_checks():
     results = await status_checks.find({}, {"_id": 0}).to_list(1000)
 
@@ -230,7 +241,6 @@ async def create_task(
         **task_data
     }
 
-    # Broadcast task creation via WebSocket
     await manager.broadcast_to_user(str(current_user["_id"]), {
         "type": "task:created",
         "task": created_task,
@@ -259,7 +269,6 @@ async def delete_task(
         "user_id": str(current_user["_id"])
     })
 
-    # Broadcast task deletion
     await manager.broadcast_to_user(str(current_user["_id"]), {
         "type": "task:deleted",
         "task_id": task_id,
@@ -282,20 +291,16 @@ async def update_task(
         {"$set": data}
     )
 
-    # Get updated task
     updated_task = await tasks.find_one({"_id": ObjectId(task_id)})
     updated_task["_id"] = str(updated_task["_id"])
 
-    # Broadcast task update
     await manager.broadcast_to_user(str(current_user["_id"]), {
         "type": "task:updated",
         "task": updated_task,
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
-    # If task completed, send achievement notification
     if data.get("completed"):
-        # Check streak
         streak = await calculate_streak(str(current_user["_id"]))
         if streak and streak % 5 == 0:
             await manager.broadcast_notification(str(current_user["_id"]), {
@@ -308,12 +313,10 @@ async def update_task(
     return {"status": "updated"}
 
 async def calculate_streak(user_id: str) -> int:
-    """Calculate user's current streak"""
-    # Simple streak calculation - can be enhanced
     user_tasks = []
     async for task in tasks.find({"user_id": user_id, "completed": True}).sort("created_at", -1).limit(10):
         user_tasks.append(task)
-    return len(user_tasks)  # Placeholder
+    return len(user_tasks)
 
 # -------------------- AI INSIGHT ROUTE --------------------
 
@@ -376,7 +379,6 @@ async def analyze_day(
 
     ordered = sorted(enriched, key=lambda x: x["score"], reverse=True)
 
-    # Build schedule
     hour = 9
     schedule = []
 
@@ -390,7 +392,6 @@ async def analyze_day(
             hour += 1
             remaining -= 1
 
-    # SAVE DAILY PLAN
     from datetime import date
     today = date.today().isoformat()
 
@@ -409,7 +410,6 @@ async def analyze_day(
         upsert=True
     )
 
-    # Broadcast schedule ready notification
     await manager.broadcast_to_user(str(current_user["_id"]), {
         "type": "schedule:ready",
         "date": today,
@@ -501,12 +501,8 @@ async def get_productivity_score(current_user=Depends(get_current_user)):
         for t in tasks:
             total_ai_time += t.get("aiTime", 0)
 
-    # Convert hours
     focus_hours = total_ai_time
-
-    # Simple scoring model
-    completion_rate = 1  # since planned tasks exist
-
+    completion_rate = 1
     focus_ratio = min(focus_hours / 8, 1)
 
     score = int(
@@ -520,10 +516,9 @@ async def get_productivity_score(current_user=Depends(get_current_user)):
         "focus_hours": round(focus_hours, 1)
     }
 
-# ⚠️ TEMPORARY TEST ENDPOINT - Add this BEFORE authentication
+# ⚠️ TEMPORARY TEST ENDPOINT
 @api_router.post("/test-task")
 async def create_test_task(task: Task):
-    """Temporary endpoint without auth for testing"""
     task_data = task.model_dump()
     task_data["_id"] = str(uuid.uuid4())
     task_data["created_at"] = datetime.now().isoformat()
@@ -597,19 +592,17 @@ async def chat_with_ai(
     request: ChatMessage,
     current_user=Depends(get_current_user)
 ):
-    """Main AI assistant chat endpoint"""
     try:
-        print(f"Received message from user {current_user['_id']}: {request.message}")
+        logger.info(f"Received message from user {current_user['_id']}: {request.message}")
         
         assistant = AIAssistant(str(current_user["_id"]), db)
         response = await assistant.process_message(request.message)
         
-        print(f"AI response: {response}")
+        logger.info(f"AI response: {response}")
         return response
         
     except Exception as e:
-        print(f"AI Assistant error: {str(e)}")
-        import traceback
+        logger.error(f"AI Assistant error: {str(e)}")
         traceback.print_exc()
         
         return {
@@ -622,12 +615,11 @@ async def chat_with_ai(
 async def get_ai_context_endpoint(
     current_user=Depends(get_current_user)
 ):
-    """Get AI assistant context for UI"""
     try:
         context = await get_ai_context(str(current_user["_id"]), db)
         return context
     except Exception as e:
-        print(f"Context error: {e}")
+        logger.error(f"Context error: {e}")
         return {
             "suggestions": [
                 "Plan my day: I need to study for 2 hours, go to the gym, and finish a project",
@@ -643,7 +635,6 @@ async def get_ai_context_endpoint(
 
 @api_router.websocket("/ws/{user_id}")
 async def websocket_route(websocket: WebSocket, user_id: str):
-    """WebSocket endpoint for real-time updates"""
     await websocket_endpoint(websocket, user_id)
 
 @api_router.post("/notify/{user_id}")
@@ -652,21 +643,17 @@ async def send_notification(
     notification: NotificationRequest,
     current_user=Depends(get_current_user)
 ):
-    """Send notification to specific user (admin only)"""
-    # Optional: Add admin check here
     await manager.broadcast_notification(user_id, notification.dict())
     return {"status": "notification sent"}
 
 @api_router.get("/online-users")
 async def get_online_users(current_user=Depends(get_current_user)):
-    """Get count of online users"""
     return {"online_count": len(manager.active_connections)}
 
 # ==================== ML ROUTES ====================
 
 @api_router.get("/ml/patterns")
 async def get_productivity_patterns(current_user=Depends(get_current_user)):
-    """Get user's productivity patterns"""
     learner = TimevoraLearner(str(current_user["_id"]), db)
     patterns = await learner.get_productivity_patterns()
     return patterns
@@ -676,7 +663,6 @@ async def predict_task_duration(
     task: dict,
     current_user=Depends(get_current_user)
 ):
-    """Predict task duration using ML"""
     learner = TimevoraLearner(str(current_user["_id"]), db)
     context = {
         'hour': datetime.now().hour,
@@ -693,36 +679,81 @@ async def get_analytics(
     days: int = 30,
     current_user=Depends(get_current_user)
 ):
-    """Get user analytics"""
     analytics_service = AnalyticsService(db)
     analytics = await analytics_service.get_user_analytics(str(current_user["_id"]), days)
     return analytics
 
 @api_router.post("/ml/train")
 async def train_model(current_user=Depends(get_current_user)):
-    """Manually trigger model training"""
     learner = TimevoraLearner(str(current_user["_id"]), db)
     success = await learner.train_model()
     return {"success": success}
+
+# ==================== TIMEVORA AI BRAIN ====================
+
+def timevora_ai(planning_data: dict) -> str:
+    total = planning_data["totalLoad"]
+    overloaded = planning_data["overloaded"]
+
+    hard_tasks = [
+        t["name"] for t in planning_data["tasks"]
+        if t["difficulty"] == "hard"
+    ]
+
+    response = []
+
+    if overloaded:
+        response.append(
+            "Your workload is too heavy for one day. I recommend moving some tasks to tomorrow to avoid burnout."
+        )
+
+    if hard_tasks:
+        response.append(
+            f"Focus on hard tasks like {', '.join(hard_tasks[:2])} in the morning when your energy is highest."
+        )
+
+    if total < 3:
+        response.append("You can handle more today if you feel productive.")
+
+    return " ".join(response) or "Your schedule looks balanced and realistic. Great job planning today!"
+
+async def get_user_accuracy(user_id: str):
+    records = []
+
+    async for r in task_history.find({"user_id": user_id}):
+        records.append(r)
+
+    if not records:
+        return {"easy": 1, "medium": 1, "hard": 1}
+
+    stats = {"easy": [], "medium": [], "hard": []}
+
+    for r in records:
+        ratio = r["actualTime"] / r["aiTime"]
+        stats[r["difficulty"]].append(ratio)
+
+    return {
+        k: round(sum(v) / len(v), 2) if v else 1
+        for k, v in stats.items()
+    }
 
 # ==================== APP SETUP ====================
 
 # Include router FIRST
 app.include_router(api_router)
 
-# ✅ FIXED CORS CONFIGURATION - Put this AFTER including router
+# ✅ CORS CONFIGURATION
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://timevorai.netlify.app",  # Your live frontend
-        "http://localhost:3000",           # Local development
-        "http://127.0.0.1:3000"            # Alternative local
+        "https://timevorai.netlify.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=600  # Cache preflight requests for 10 minutes
 )
 
 # ✅ OPTIONS handler for all routes
@@ -730,14 +761,10 @@ app.add_middleware(
 async def options_handler():
     return {}
 
-logging.basicConfig(level=logging.INFO)
-
-@app.on_event("shutdown")
-async def shutdown_db():
-    client.close()
-
 # -------------------- RUN --------------------
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)  # Changed to 0.0.0.0 to allow external access
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting server on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
