@@ -78,12 +78,26 @@ except Exception as e:
     logger.error(traceback.format_exc())
 
 # -------------------- APP --------------------
-
 app = FastAPI(title="Timevora API", description="Timevora Backend API", version="1.0.0")
+
+# ✅ CORS middleware - MUST be added BEFORE including routers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://timevorai.netlify.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+# Create API router
 api_router = APIRouter(prefix="/api")
 
 # -------------------- ROOT ENDPOINTS --------------------
-
 @app.get("/")
 async def root():
     """Root endpoint to verify API is running"""
@@ -118,8 +132,13 @@ async def health_head():
     """HEAD request handler for health endpoint"""
     return JSONResponse(content={}, status_code=200)
 
-# -------------------- MODELS --------------------
+# -------------------- TEST CORS ENDPOINT (add this) --------------------
+@api_router.get("/test-cors")
+async def test_cors():
+    """Simple endpoint to test CORS headers"""
+    return {"message": "CORS is working", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+# -------------------- MODELS --------------------
 class StatusCheck(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -178,7 +197,7 @@ class NotificationRequest(BaseModel):
     icon: Optional[str] = None
     data: Optional[dict] = None
 
-# -------------------- API ROUTES --------------------
+# -------------------- API ROUTES (all your existing routes) --------------------
 
 @api_router.get("/")
 async def api_root():
@@ -198,7 +217,8 @@ async def api_root():
             "/api/productivity-score",
             "/api/ai-assistant/chat",
             "/api/ml/patterns",
-            "/api/analytics"
+            "/api/analytics",
+            "/api/test-cors"
         ]
     }
 
@@ -750,22 +770,8 @@ async def get_user_accuracy(user_id: str):
 
 # ==================== APP SETUP ====================
 
-# Include router FIRST
+# Include router AFTER CORS middleware
 app.include_router(api_router)
-
-# ✅ CORS CONFIGURATION - UPDATED (only this, no manual middleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://timevorai.netlify.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
 
 # -------------------- RUN --------------------
 
