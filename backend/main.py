@@ -106,10 +106,11 @@ async def root_head():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render"""
+    mongo_status = "connected" if 'client' in globals() and client is not None else "disconnected"
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "mongodb": "connected" if 'client' in locals() else "disconnected"
+        "mongodb": mongo_status
     }
 
 @app.head("/health")
