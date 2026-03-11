@@ -132,7 +132,7 @@ async def health_head():
     """HEAD request handler for health endpoint"""
     return JSONResponse(content={}, status_code=200)
 
-# -------------------- TEST CORS ENDPOINT (add this) --------------------
+# -------------------- TEST CORS ENDPOINT --------------------
 @api_router.get("/test-cors")
 async def test_cors():
     """Simple endpoint to test CORS headers"""
@@ -197,7 +197,7 @@ class NotificationRequest(BaseModel):
     icon: Optional[str] = None
     data: Optional[dict] = None
 
-# -------------------- API ROUTES (all your existing routes) --------------------
+# -------------------- API ROUTES --------------------
 
 @api_router.get("/")
 async def api_root():
@@ -546,7 +546,7 @@ async def create_test_task(task: Task):
     print(f"✅ Test task created: {task_data}")
     return task_data
 
-# -------------------- AUTH ROUTES --------------------
+# -------------------- AUTH ROUTES (UPDATED - NO EMAIL VERIFICATION) --------------------
 
 @api_router.post("/signup")
 async def signup(user: SignupRequest):
@@ -556,22 +556,18 @@ async def signup(user: SignupRequest):
         logger.warning(f"Email already registered: {user.email}")
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    token = generate_verification_token()
-
+    # Create user WITHOUT email verification (auto-verified)
     new_user = {
         "email": user.email,
         "hashed_password": hash_password(user.password),
-        "is_verified": False,
-        "verification_token": token,
+        "is_verified": True,  # 👈 AUTO-VERIFIED
         "created_at": datetime.now(timezone.utc)
     }
 
     await users.insert_one(new_user)
-    logger.info(f"User created: {user.email}")
+    logger.info(f"User created and auto-verified: {user.email}")
 
-    send_verification_email(user.email, token)
-
-    return {"message": "Signup successful. Please verify your email."}
+    return {"message": "Signup successful! You can now log in."}
 
 @api_router.post("/login")
 async def login(user: LoginRequest):
@@ -583,9 +579,10 @@ async def login(user: LoginRequest):
         logger.warning(f"User not found: {user.email}")
         raise HTTPException(status_code=400, detail="Invalid credentials")
 
-    if not db_user["is_verified"]:
-        logger.warning(f"Email not verified: {user.email}")
-        raise HTTPException(status_code=403, detail="Email not verified")
+    # REMOVED email verification check - users can log in immediately
+    # if not db_user["is_verified"]:
+    #     logger.warning(f"Email not verified: {user.email}")
+    #     raise HTTPException(status_code=403, detail="Email not verified")
 
     if not verify_password(user.password, db_user["hashed_password"]):
         logger.warning(f"Invalid password for: {user.email}")
