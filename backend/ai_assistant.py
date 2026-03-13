@@ -4,6 +4,12 @@ import re
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import random
+import openai
+import os
+import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class IntentType(str, Enum):
     CREATE_SCHEDULE = "create_schedule"
@@ -34,10 +40,113 @@ class AIAssistant:
     def __init__(self, user_id: str, db):
         self.user_id = user_id
         self.db = db
+        # Initialize OpenAI client
+        openai.api_key = os.getenv("OPENAI_API_KEY")
     
     async def process_message(self, message: str) -> Dict[str, Any]:
-        """Main entry point for processing user messages"""
+        """Main entry point for processing user messages with AI"""
         
+        try:
+            # Try AI first
+            intent = await self._detect_intent(message)
+            user_context = await self._get_user_context()
+            
+            # Create AI prompt
+            system_prompt = self._create_ai_prompt(intent, user_context)
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message}
+                ],
+                temperature=0.7,
+                max_tokens=800
+            )
+            
+            ai_message = response.choices[0].message.content
+            
+            # Try to parse AI response as JSON
+            try:
+                ai_response = json.loads(ai_message)
+                return ai_response
+            except:
+                # If AI response isn't JSON, fall back to rule-based
+                return await self._rule_based_processing(message)
+                
+        except Exception as e:
+            logger.error(f"AI error: {e}")
+            # Fall back to rule-based system
+            return await self._rule_based_processing(message)
+    
+    def _create_ai_prompt(self, intent: IntentType, context: str) -> str:
+        """Create AI prompt based on intent"""
+        
+        base_prompt = f"""You are Timevora AI, an elite productivity planner and cognitive performance coach.
+Current user context: {context}
+
+"""
+        
+        if intent == IntentType.CREATE_SCHEDULE:
+            return base_prompt + """The user wants to create a schedule. Extract tasks with durations and times.
+Respond with a JSON object in this exact format:
+{
+    "type": "schedule",
+    "message": "I've created your schedule!",
+    "tasks_found": ["task1", "task2", "task3"],
+    "schedule": [
+        {"time": "9:00 AM - 11:00 AM", "task": "Task description"},
+        {"time": "11:30 AM - 12:30 PM", "task": "Another task"}
+    ],
+    "insights": ["Tip 1", "Tip 2"]
+}"""
+        
+        elif intent == IntentType.GET_ADVICE:
+            return base_prompt + """The user wants productivity advice. Provide personalized tips.
+Respond with:
+{
+    "type": "advice",
+    "message": "Here are my top tips",
+    "advice_points": ["Tip 1", "Tip 2", "Tip 3"],
+    "insight": "Personalized insight"
+}"""
+        
+        elif intent == IntentType.ASK_QUESTION:
+            return base_prompt + """Answer the user's question about productivity.
+Respond with:
+{
+    "type": "answer",
+    "message": "Detailed answer",
+    "follow_up": "Follow-up question",
+    "suggestions": ["Related 1", "Related 2"]
+}"""
+        
+        elif intent == IntentType.ANALYZE_HABITS:
+            return base_prompt + """Analyze the user's habits based on context.
+Respond with:
+{
+    "type": "analysis",
+    "message": "Analysis summary",
+    "stats": {
+        "completion_rate": "XX%",
+        "total_tasks": X,
+        "completed": X,
+        "avg_task_duration": "X.X hours"
+    },
+    "insight": "Personalized insight"
+}"""
+        
+        else:
+            return base_prompt + """Have a friendly conversation about productivity.
+Respond with:
+{
+    "type": "chat",
+    "message": "Friendly response",
+    "suggestions": ["Suggestion 1", "Suggestion 2", "Suggestion 3"]
+}"""
+    
+    async def _rule_based_processing(self, message: str) -> Dict[str, Any]:
+        """Your original rule-based processing (kept exactly as is)"""
         intent = await self._detect_intent(message)
         
         if intent == IntentType.CREATE_SCHEDULE:
@@ -52,7 +161,7 @@ class AIAssistant:
             return await self._handle_general_chat(message)
     
     async def _detect_intent(self, message: str) -> IntentType:
-        """Detect user intent"""
+        """Detect user intent (your original method)"""
         message_lower = message.lower()
         
         # STRONG SCHEDULE DETECTION
@@ -86,6 +195,65 @@ class AIAssistant:
             return IntentType.ANALYZE_HABITS
         
         return IntentType.GENERAL_CHAT
+    
+    async def _get_user_context(self) -> str:
+        """Get user context for AI"""
+        context_parts = []
+        
+        # Get tasks
+        try:
+            tasks_cursor = self.db.tasks.find({"user_id": self.user_id}).limit(5)
+            tasks = await tasks_cursor.to_list(5)
+            if tasks:
+                task_list = [f"- {t.get('text', '')} (Priority: {t.get('priority', 'medium')})" for t in tasks if t.get('text')]
+                if task_list:
+                    context_parts.append("Current tasks:\n" + "\n".join(task_list))
+        except Exception as e:
+            logger.error(f"Error fetching tasks: {e}")
+        
+        # Get plans
+        try:
+            plans_cursor = self.db.daily_plans.find({"user_id": self.user_id}).sort("created_at", -1).limit(3)
+            plans = await plans_cursor.to_list(3)
+            if plans:
+                context_parts.append(f"Recent plans: {len(plans)} plans saved")
+        except Exception as e:
+            logger.error(f"Error fetching plans: {e}")
+        
+        # Get accuracy
+        accuracy = await self._get_user_accuracy()
+        if accuracy:
+            context_parts.append(f"Accuracy: Easy {accuracy.get('easy', 1)}x, Medium {accuracy.get('medium', 1)}x, Hard {accuracy.get('hard', 1)}x")
+        
+        return "\n".join(context_parts) if context_parts else "New user with no history yet."
+    
+    async def _get_user_accuracy(self):
+        """Get user's task estimation accuracy"""
+        try:
+            records_cursor = self.db.task_history.find({"user_id": self.user_id}).sort("created_at", -1).limit(50)
+            records = await records_cursor.to_list(50)
+            
+            if not records:
+                return None
+            
+            stats = {"easy": [], "medium": [], "hard": []}
+            for r in records:
+                if r.get("actualTime") and r.get("aiTime") and r["aiTime"] > 0:
+                    ratio = r["actualTime"] / r["aiTime"]
+                    difficulty = r.get("difficulty", "medium")
+                    if difficulty in stats:
+                        stats[difficulty].append(ratio)
+            
+            result = {}
+            for k, v in stats.items():
+                if v:
+                    result[k] = round(sum(v) / len(v), 2)
+                else:
+                    result[k] = 1
+            return result
+        except Exception as e:
+            logger.error(f"Error calculating accuracy: {e}")
+            return None
     
     def _parse_time(self, time_str: str) -> Optional[float]:
         """Convert time string like '8:30am' or '4pm' to hour number (e.g., 8.5 or 16.0)"""
@@ -521,10 +689,10 @@ async def get_ai_context(user_id: str, db):
     count = await collection.count_documents({"user_id": user_id})
     
     suggestions = [
-        "Plan my day: study for 2 hours, go to the gym, and finish project",
-        "Give me productivity advice",
+        "Plan my day: study for 2 hours, go to the gym at 4pm, and finish project by evening",
+        "Give me productivity advice for deep work",
         "How can I improve my focus?",
-        "Analyze my productivity habits"
+        "Analyze my productivity habits this week"
     ]
     
     if count > 0:
