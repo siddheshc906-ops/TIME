@@ -30,3 +30,4 @@ dnspython>=2.6.0
 scikit-learn>=1.4.0
 argon2-cffi>=23.1.0
 slowapi==0.1.9
+google-auth>=2.29.0
