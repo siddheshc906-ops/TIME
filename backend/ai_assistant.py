@@ -282,12 +282,42 @@ class AIAssistant:
         elif "saved_routine" in source:
             insights.append("📅 Scheduled around your saved daily routine!")
 
+        # Separate scheduled vs deferred tasks
+        scheduled = [s for s in schedule if not s.get("deferred")]
+        deferred  = [s for s in schedule if s.get("deferred")]
+
+        if deferred:
+            deferred_names = [d["task"] for d in deferred]
+            # Sort deferred by priority — high priority tasks should be done tomorrow first
+            priority_order = {"high": 0, "medium": 1, "low": 2}
+            deferred.sort(key=lambda x: priority_order.get(x.get("priority", "medium"), 1))
+
+            insights.append(
+                f"⚠️ {len(deferred)} task(s) don't fit in your free hours today: "
+                f"{', '.join(deferred_names)}. I've marked them for tomorrow."
+            )
+            # Add deferral suggestions
+            high_deferred = [d for d in deferred if d.get("priority") == "high"]
+            if high_deferred:
+                insights.append(
+                    f"🔴 '{high_deferred[0]['task']}' is high priority — consider removing a lower-priority task today to fit it in."
+                )
+            else:
+                insights.append(
+                    f"💡 To fit everything today, try shortening or removing a lower-priority task."
+                )
+
+        message = f"✅ Scheduled {len(scheduled)} task(s) today!"
+        if deferred:
+            message += f" {len(deferred)} moved to tomorrow (not enough free time)."
+
         return {
-            "type":        "schedule",
-            "message":     f"✅ Created schedule with {len(tasks)} tasks!",
-            "tasks_found": [t.get("name", "Task") for t in tasks],
-            "schedule":    schedule,
-            "insights":    insights if insights else ["💡 Remember to take short breaks between tasks"],
+            "type":           "schedule",
+            "message":        message,
+            "tasks_found":    [t.get("name", "Task") for t in tasks],
+            "schedule":       scheduled,
+            "deferred_tasks": deferred,
+            "insights":       insights if insights else ["💡 Remember to take short breaks between tasks"],
         }
     
     async def _manual_extract_tasks(self, message: str) -> List[Dict]:
@@ -944,18 +974,26 @@ Respond with:
         summary_parts.append(f"• Free for tasks: from {self._dec_to_str(ctx.get('day_start', 9.0))}")
         summary_parts.append(f"• Day ends: {self._dec_to_str(ctx.get('day_end', 22.0))}")
 
+        # Calculate free windows from saved routine for display
+        day_start_str = self._dec_to_str(ctx.get("day_start", 9.0))
+        day_end_str   = self._dec_to_str(ctx.get("day_end", 22.0))
+        free_hours    = round(ctx.get("day_end", 22.0) - ctx.get("day_start", 9.0), 1)
+
         return {
             "type":    "chat",
             "message": (
                 "✅ Got it! I've saved your daily routine. From now on I'll schedule your tasks "
                 "around your real day:\n\n"
                 + "\n".join(summary_parts)
+                + f"\n\n🕐 You have approximately {free_hours}h of free time available for tasks."
                 + "\n\nJust tell me what tasks you want to do and I'll fit them into your free slots!"
             ),
+            "routine_saved": True,
+            "free_hours": free_hours,
             "suggestions": [
-                "Add meditation for 30 minutes",
-                "I need to study Physics for 2 hours",
                 "Plan my remaining tasks for today",
+                "I need to study Physics for 2 hours",
+                "Add meditation for 30 minutes",
             ],
         }
 
@@ -1123,6 +1161,7 @@ Respond with:
           • custom blocked_slots
           • existing scheduled items
         Returns a new schedule list with correct sequential times.
+        Overflow tasks (don't fit today) are tagged with deferred=True.
         """
         # Build a list of occupied intervals from the day context
         blocked = []
@@ -1147,7 +1186,6 @@ Respond with:
             if isinstance(s, (int, float)) and isinstance(e, (int, float)):
                 blocked.append((float(s), float(e)))
             else:
-                # Try to parse string times
                 def _p(t):
                     import re
                     if not t: return None
@@ -1175,18 +1213,28 @@ Respond with:
                     return False
             return True
 
+        def free_hours_remaining(from_time):
+            """Calculate how many free hours are left from from_time to day_end."""
+            total = 0.0
+            t = from_time
+            step = 0.25
+            while t + step <= day_end:
+                if is_free(t, t + step):
+                    total += step
+                t += step
+            return total
+
         schedule = []
         cursor = day_start
 
         for task in tasks:
             dur = round(float(task.get("duration", 1.0)), 2)
             # Advance cursor past any blocked slots
-            max_tries = 48  # up to 24h in 30-min steps
+            max_tries = 96
             tries = 0
             while tries < max_tries:
                 if is_free(cursor, cursor + dur):
                     break
-                # Skip to end of the blocking interval
                 overlapping = [be for bs, be in blocked if cursor < be and cursor + dur > bs]
                 if overlapping:
                     cursor = max(overlapping) + 0.25
@@ -1194,10 +1242,24 @@ Respond with:
                     cursor += 0.25
                 tries += 1
 
+            # Check if task fits before day_end
             if cursor + dur > day_end:
-                logger.warning(f"Task '{task.get('name')}' doesn't fit before day_end — appending anyway")
+                # Task doesn't fit today — mark as deferred
+                logger.info(f"Task '{task.get('name')}' doesn't fit today — marking deferred")
+                schedule.append({
+                    "task":      task.get("name", "Task"),
+                    "duration":  dur,
+                    "priority":  task.get("priority",   "medium"),
+                    "difficulty": task.get("difficulty", "medium"),
+                    "category":  task.get("category",   "general"),
+                    "deferred":  True,
+                    "time":      "Tomorrow",
+                    "start_time": None,
+                    "end_time":   None,
+                })
+                continue
 
-            end_dec  = cursor + dur
+            end_dec   = cursor + dur
             start_str = self._dec_to_str(cursor)
             end_str   = self._dec_to_str(end_dec)
 
@@ -1212,12 +1274,12 @@ Respond with:
                 "time":           f"{start_str} - {end_str}",
                 "start_time_str": start_str,
                 "end_time_str":   end_str,
+                "deferred":       False,
             })
 
-            # Add to blocked so the next task doesn't overlap
             blocked.append((cursor, end_dec))
             blocked.sort(key=lambda x: x[0])
-            cursor = end_dec + 0.25  # 15-min buffer
+            cursor = end_dec + 0.25
 
         return schedule
 
