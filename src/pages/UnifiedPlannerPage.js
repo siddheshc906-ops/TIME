@@ -115,17 +115,7 @@ export const UnifiedPlannerPage = () => {
 
   // ── Load from localStorage first (instant), then sync with backend ────────
   useEffect(() => {
-    // Step 1: Load from localStorage immediately (fast)
-    try {
-      const saved = localStorage.getItem("todo-tasks");
-      if (saved) {
-        setTasks(JSON.parse(saved));
-      }
-    } catch (err) {
-      console.error("Failed to load from localStorage:", err);
-    }
-    
-    // Step 2: Decode user ID from token — supports both email-login (user_id) and google/phone (sub)
+    // Decode user ID from token — supports both email-login (user_id) and google/phone (sub)
     const token = localStorage.getItem("token");
     if (token) {
       try {
@@ -161,24 +151,10 @@ export const UnifiedPlannerPage = () => {
         const serverTasks = await res.json();
         
         if (Array.isArray(serverTasks)) {
-          setTasks(prevTasks => {
-            const taskMap = new Map();
-
-            // Server is source of truth — add all server tasks
-            serverTasks.forEach(t => taskMap.set(t._id, t));
-
-            // Only keep temp tasks added in the last 10 seconds (truly pending, not yet saved)
-            const now = Date.now();
-            prevTasks.forEach(t => {
-              if (t._temp && (now - new Date(t.created_at).getTime()) < 10000) {
-                taskMap.set(t._id, t);
-              }
-            });
-
-            const merged = Array.from(taskMap.values());
-            merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-            return merged;
-          });
+          // Server is the single source of truth — wipe localStorage and use server data
+          localStorage.removeItem("todo-tasks");
+          const sorted = [...serverTasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          setTasks(sorted);
         }
         setSyncStatus("synced");
       } else if (res.status === 401) {
