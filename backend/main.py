@@ -85,15 +85,22 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+_cors_from_env = [o.strip() for o in _cors_env.split(",") if o.strip()]
+_cors_defaults = [
+    "https://timevorai.netlify.app",
+    "https://timevora-delta.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+]
+_all_cors_origins = list(set(_cors_defaults + _cors_from_env))
+logger.info(f"CORS origins: {_all_cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://timevorai.netlify.app",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-    ],
+    allow_origins=_all_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
