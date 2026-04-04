@@ -162,27 +162,22 @@ export const UnifiedPlannerPage = () => {
         
         if (Array.isArray(serverTasks)) {
           setTasks(prevTasks => {
-            // If server returned tasks, merge them with any local temp tasks
-            if (serverTasks.length > 0) {
-              const taskMap = new Map();
-              
-              // Add server tasks first (source of truth)
-              serverTasks.forEach(t => taskMap.set(t._id, t));
-              
-              // Keep local temp tasks that haven't synced yet
-              prevTasks.forEach(t => {
-                if (t._temp) taskMap.set(t._id, t);
-              });
-              
-              const merged = Array.from(taskMap.values());
-              merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-              return merged;
-            }
-            
-            // Server returned empty array - trust it (user has no tasks)
-            // But keep any unsynced temp tasks
-            const tempTasks = prevTasks.filter(t => t._temp);
-            return tempTasks;
+            const taskMap = new Map();
+
+            // Server is source of truth — add all server tasks
+            serverTasks.forEach(t => taskMap.set(t._id, t));
+
+            // Only keep temp tasks added in the last 10 seconds (truly pending, not yet saved)
+            const now = Date.now();
+            prevTasks.forEach(t => {
+              if (t._temp && (now - new Date(t.created_at).getTime()) < 10000) {
+                taskMap.set(t._id, t);
+              }
+            });
+
+            const merged = Array.from(taskMap.values());
+            merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            return merged;
           });
         }
         setSyncStatus("synced");
