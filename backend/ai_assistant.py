@@ -2730,8 +2730,26 @@ advice_points can be [] for purely conversational messages."""
                 raw = raw[4:]
         return json.loads(raw.strip())
 
-    # ── 1. Try Claude first (primary — no daily quota, generous rate limits) ──
+    def _build_success_response(parsed):
+        """Helper to build the standard success response from a parsed AI reply."""
+        return {
+            "success":       True,
+            "message":       parsed.get("message", "Ask me anything about your productivity."),
+            "advice_points": parsed.get("advice_points", []),
+            "suggestions":   parsed.get("suggestions", [
+                "What's my biggest productivity gap?",
+                "How can I improve my completion rate?",
+                "How do I build a focus habit?",
+            ]),
+            "context_used": context_used,
+            "data_points":  task_count,
+            "data_summary": data_summary,
+            "type":         "advice",
+        }
+
+    # ── 1. Try Claude first (primary) ────────────────────────────────────────
     CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+    logger.info(f"[Guidance] Claude API key present: {bool(CLAUDE_API_KEY)}")
     if CLAUDE_API_KEY:
         try:
             import anthropic
@@ -2743,25 +2761,14 @@ advice_points can be [] for purely conversational messages."""
                 messages=[{"role": "user", "content": question}],
             )
             parsed = _parse_ai_response(claude_resp.content[0].text)
-            return {
-                "success":       True,
-                "message":       parsed.get("message", "Ask me anything about your productivity."),
-                "advice_points": parsed.get("advice_points", []),
-                "suggestions":   parsed.get("suggestions", [
-                    "What's my biggest productivity gap?",
-                    "How can I improve my completion rate?",
-                    "How do I build a focus habit?",
-                ]),
-                "context_used": context_used,
-                "data_points":  task_count,
-                "data_summary": data_summary,
-                "type":         "advice",
-            }
+            logger.info("[Guidance] Claude responded successfully")
+            return _build_success_response(parsed)
         except Exception as e:
-            logger.error(f"Claude coaching call failed: {e}", exc_info=True)
+            logger.error(f"[Guidance] Claude failed: {type(e).__name__}: {e}", exc_info=True)
 
     # ── 2. Fall back to Gemini (secondary) ───────────────────────────────────
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    logger.info(f"[Guidance] Gemini API key present: {bool(GEMINI_API_KEY)}")
     if GEMINI_API_KEY:
         try:
             from google import genai
@@ -2774,27 +2781,73 @@ advice_points can be [] for purely conversational messages."""
                 config=types.GenerateContentConfig(max_output_tokens=700, temperature=0.75),
             )
             parsed = _parse_ai_response(gemini_resp.text)
-            return {
-                "success":       True,
-                "message":       parsed.get("message", "Ask me anything about your productivity."),
-                "advice_points": parsed.get("advice_points", []),
-                "suggestions":   parsed.get("suggestions", [
-                    "What's my biggest productivity gap?",
-                    "How can I improve my completion rate?",
-                    "How do I build a focus habit?",
-                ]),
-                "context_used": context_used,
-                "data_points":  task_count,
-                "data_summary": data_summary,
-                "type":         "advice",
-            }
+            logger.info("[Guidance] Gemini responded successfully")
+            return _build_success_response(parsed)
         except Exception as e:
-            logger.error(f"Gemini coaching call failed: {e}", exc_info=True)
+            logger.error(f"[Guidance] Gemini failed: {type(e).__name__}: {e}", exc_info=True)
 
-    # ── Smart rule-based fallback (no Gemini or Gemini failed) ───────────────
+    # ── 3. Fall back to OpenAI (tertiary) ────────────────────────────────────
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    logger.info(f"[Guidance] OpenAI API key present: {bool(OPENAI_API_KEY)}")
+    if OPENAI_API_KEY:
+        try:
+            import openai as _openai
+            _openai.api_key = OPENAI_API_KEY
+            oai_resp = _openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                max_tokens=700,
+                temperature=0.75,
+                messages=[
+                    {"role": "system", "content": coaching_system_prompt},
+                    {"role": "user",   "content": question},
+                ],
+            )
+            parsed = _parse_ai_response(oai_resp.choices[0].message.content)
+            logger.info("[Guidance] OpenAI responded successfully")
+            return _build_success_response(parsed)
+        except Exception as e:
+            logger.error(f"[Guidance] OpenAI failed: {type(e).__name__}: {e}", exc_info=True)
+
+    # ── No AI key available / all failed ─────────────────────────────────────
+    logger.warning("[Guidance] All AI providers failed or no keys set — using rule-based fallback")
+
+    # ── Smart rule-based fallback (all AI providers failed / no keys set) ──────
+    # NOTE: If you see this in production, check your CLAUDE_API_KEY / GEMINI_API_KEY
+    # / OPENAI_API_KEY environment variables. The rule-based fallback cannot answer
+    # arbitrary questions — it only handles known keyword categories.
     q = question.lower()
 
-    if any(w in q for w in ["productive", "improve", "better", "score", "result", "how am i", "my data", "analysis", "analyse", "analyze", "performance", "completion", "rate", "low", "why", "increase", "boost", "tips", "advice", "suggest", "help me", "what should"]):
+    # Determine the best tips based on the user's actual weakest area
+    def _weakest_area_tips():
+        if focus_sessions == 0:
+            return (
+                f"Looking at your data ({completion_rate}% completion, {focus_hours_total}h focus, {streak}-day streak), the biggest unlock is structured focus time. Most productivity problems aren't about effort — they're about working in reactive mode instead of intentional blocks.",
+                [
+                    "Pomodoro technique: set a 25-minute timer, work on ONE task only, then 5-minute break. The constraint creates urgency that defeats procrastination.",
+                    "Time-blocking: assign specific tasks to specific time slots in your day — don't just have a to-do list, have a schedule.",
+                    "Phone in another room during work blocks — out of sight reduces distractions by ~30% without any willpower.",
+                ]
+            )
+        elif completion_rate < 70:
+            return (
+                f"Your data shows {completion_rate}% task completion — the most common cause isn't laziness, it's task sizing. When tasks are too vague or too big, your brain resists starting them.",
+                [
+                    "2-minute rule: if defining the next action takes less than 2 minutes, do it immediately. Vague tasks ('work on project') become specific ones ('write intro paragraph').",
+                    "The 1-3-5 rule: each day plan exactly 1 big task, 3 medium, 5 small. This forces prioritisation and creates realistic daily targets.",
+                    "Never put 'Study' or 'Work on X' on your list — always write the specific next physical action: 'Read pages 10-30', 'Write 200 words of section 2'.",
+                ]
+            )
+        else:
+            return (
+                f"You're at {completion_rate}% completion with a {streak}-day streak — solid foundation. The next level is about deepening quality, not just quantity.",
+                [
+                    "Weekly review: every Sunday, 15 minutes reviewing what you finished, what blocked you, and your top 3 priorities for the coming week.",
+                    "Energy management: schedule your hardest task during your peak energy hours — most people waste their best hours on low-value tasks.",
+                    "The shutdown ritual: at day's end, write tomorrow's top 3 tasks. This stops work thoughts from bleeding into rest time.",
+                ]
+            )
+
+    if any(w in q for w in ["productive", "improve", "better", "score", "result", "how am i", "my data", "analysis", "analyse", "analyze", "performance", "completion", "rate", "low", "why", "increase", "boost", "tips", "advice", "suggest", "help me", "what should", "structure", "week", "day", "routine", "organis", "organiz"]):
         if context_used:
             weakest = []
             if focus_sessions == 0:
@@ -2872,29 +2925,9 @@ advice_points can be [] for purely conversational messages."""
             msg = "No prediction data yet. The most common mistake in time management is the planning fallacy — we all underestimate how long things take. A simple fix: always add a 25% buffer to your time estimates."
             tips = ["Add a 25% time buffer to every estimate — it's the single most effective scheduling habit", "Break tasks into sub-steps before estimating — step-level estimates are far more accurate than whole-task guesses", "Track actual vs planned time for 1 week — the awareness alone improves your estimates"]
     else:
+        # Catch-all: answer based on the user's weakest area regardless of the question
         if context_used:
-            # Give genuinely useful advice based on their weakest area
-            if focus_sessions == 0:
-                msg = f"Looking at your data ({completion_rate}% completion, {focus_hours_total}h focus, {streak}-day streak), the biggest unlock is structured focus time. Most productivity problems aren't about effort — they're about working in reactive mode instead of intentional blocks."
-                tips = [
-                    "Pomodoro technique: set a 25-minute timer, work on ONE task only, then 5-minute break. The constraint creates urgency that defeats procrastination.",
-                    "Time-blocking: assign specific tasks to specific time slots in your day — don't just have a to-do list, have a schedule.",
-                    "Phone in another room during work blocks — out of sight reduces distractions by ~30% without any willpower.",
-                ]
-            elif completion_rate < 70:
-                msg = f"Your data shows {completion_rate}% completion — the most common cause isn't laziness, it's task sizing. When tasks are too vague or too big, your brain resists starting them."
-                tips = [
-                    "2-minute rule: if defining the next action takes less than 2 minutes, do it immediately. Vague tasks ('work on project') become specific ones ('write intro paragraph').",
-                    "The 1-3-5 rule: each day plan exactly 1 big task, 3 medium, 5 small. This forces prioritisation and creates realistic daily targets.",
-                    "Never put 'Study' or 'Work on X' on your list — always write the specific next physical action: 'Read pages 10-30', 'Write 200 words of section 2'.",
-                ]
-            else:
-                msg = f"You're at {completion_rate}% completion with a {streak}-day streak — solid foundation. The next level is about deepening quality, not just quantity."
-                tips = [
-                    "Weekly review: every Sunday, 15 minutes reviewing what you finished, what blocked you, and your top 3 priorities for the coming week. This alone improves output significantly.",
-                    "Energy management: schedule your hardest task during your peak energy hours, not just whenever — most people waste their best hours on email.",
-                    "The shutdown ritual: at day's end, write tomorrow's top 3 tasks and say 'shutdown complete'. This stops work thoughts from bleeding into rest time.",
-                ]
+            msg, tips = _weakest_area_tips()
         else:
             msg = "The fundamentals of productivity work regardless of where you are. Start here: each morning write your top 3 tasks (not 10, just 3), protect one 25-minute block from all interruptions, and do a 5-minute review each evening."
             tips = [
