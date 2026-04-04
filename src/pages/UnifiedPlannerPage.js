@@ -653,11 +653,6 @@ export const UnifiedPlannerPage = () => {
                                   }`}
                                 >
                                   {task.text}
-                                  {task._temp && (
-                                    <span className="ml-2 text-xs text-gray-400 animate-pulse">
-                                      syncing...
-                                    </span>
-                                  )}
                                 </p>
                               </div>
 
