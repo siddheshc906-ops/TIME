@@ -232,17 +232,34 @@ export default function AIAssistant({
 
             // Push schedule to the left timeline panel
             if (data.type === "schedule" && data.schedule && data.schedule.length > 0 && onScheduleCreated) {
-                // When full_schedule_in_response=true the backend already merged existing+new.
-                // Pass addIntent=false so AIPlannerPage just replaces its state directly
-                // without merging again (which would duplicate the existing tasks).
                 const backendAlreadyMerged = Boolean(data.full_schedule_in_response);
                 const addIntent = Boolean(data.add_intent) && !backendAlreadyMerged;
                 onScheduleCreated(
                     data.schedule,
                     data.tasks_found || [],
                     data.insights    || [],
-                    addIntent,   // true = frontend should merge; false = use as-is
+                    addIntent,
                 );
+
+                // Show deferred tasks as a follow-up message
+                if (data.deferred_tasks && data.deferred_tasks.length > 0) {
+                    const deferredNames = data.deferred_tasks.map(t => t.task).join(", ");
+                    const highPriority  = data.deferred_tasks.filter(t => t.priority === "high");
+                    let deferredMsg = `📅 **Moved to tomorrow:** ${deferredNames}\n\nThese tasks don't fit in your free time today.`;
+                    if (highPriority.length > 0) {
+                        deferredMsg += `\n\n🔴 **${highPriority[0].task}** is high priority — consider removing a lower-priority task today to make room for it.`;
+                    }
+                    deferredMsg += `\n\n💡 Say "remove [task name]" to free up time, or "do [task] tomorrow" to keep it deferred.`;
+                    setTimeout(() => {
+                        setMessages(prev => [...prev, {
+                            id:        Date.now() + 2,
+                            role:      "assistant",
+                            content:   deferredMsg,
+                            type:      "deferred",
+                            timestamp: new Date().toISOString(),
+                        }]);
+                    }, 600);
+                }
             } else if (data.type === "schedule" && (!data.schedule || data.schedule.length === 0)) {
                 console.warn("Received empty schedule from AI");
             }
