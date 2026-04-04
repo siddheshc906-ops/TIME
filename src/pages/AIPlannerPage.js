@@ -142,6 +142,24 @@ export default function AIPlannerPage() {
   const [feedbackSummary,  setFeedbackSummary]  = useState(null);
   const [totalTasksTracked, setTotalTasksTracked] = useState(0);
 
+  // ── User routine/preferences state ──────────────────────────────────────
+  const [showRoutineModal, setShowRoutineModal] = useState(false);
+  const [routine, setRoutine] = useState(() => {
+    try {
+      const saved = localStorage.getItem("user-routine");
+      return saved ? JSON.parse(saved) : {
+        occupation: "student",
+        wakeTime: "07:00",
+        sleepTime: "23:00",
+        busyStart: "09:00",
+        busyEnd: "17:00",
+        busyLabel: "College",
+        hasBusy: true,
+      };
+    } catch { return { occupation: "student", wakeTime: "07:00", sleepTime: "23:00", busyStart: "09:00", busyEnd: "17:00", busyLabel: "College", hasBusy: true }; }
+  });
+  const [routineSaving, setRoutineSaving] = useState(false);
+
   // ── fetch today's plan ───────────────────────────────────────────────────
   const fetchPlan = useCallback(async () => {
     setLoading(true);
@@ -264,6 +282,30 @@ export default function AIPlannerPage() {
       console.debug("Feedback summary not available:", e.message);
     }
   }, []);
+
+  // ── Save user routine to backend ─────────────────────────────────────────
+  const saveRoutine = async () => {
+    setRoutineSaving(true);
+    try {
+      localStorage.setItem("user-routine", JSON.stringify(routine));
+      const occupationLabels = { student: "student", professional: "working professional", freelancer: "freelancer", other: "other" };
+      const busyLabel = routine.hasBusy ? routine.busyLabel || "college" : "";
+      const message = routine.hasBusy
+        ? `I wake up at ${routine.wakeTime}. I have ${busyLabel} from ${routine.busyStart} to ${routine.busyEnd}. I sleep at ${routine.sleepTime}. I am a ${occupationLabels[routine.occupation] || routine.occupation}.`
+        : `I wake up at ${routine.wakeTime}. I sleep at ${routine.sleepTime}. I am a ${occupationLabels[routine.occupation] || routine.occupation}. I am free all day.`;
+      await fetch(`${API}/api/ai-assistant/chat`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ message }),
+      });
+      setShowRoutineModal(false);
+      toast && toast.success ? toast.success("Routine saved! AI will now schedule around your hours.") : alert("Routine saved!");
+    } catch (e) {
+      console.error("Failed to save routine:", e);
+    } finally {
+      setRoutineSaving(false);
+    }
+  };
 
   // ── Pending task selection ────────────────────────────────────────────────
   const togglePendingTask = (task) => {
@@ -890,6 +932,14 @@ export default function AIPlannerPage() {
                   <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
                 </button>
                 <button
+                  onClick={() => setShowRoutineModal(true)}
+                  title="Set your daily schedule so AI plans around your hours"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 transition-colors shadow-sm"
+                >
+                  <Clock size={15} />
+                  My Routine
+                </button>
+                <button
                   onClick={() => setShowAssistant((v) => !v)}
                   className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium
                               transition-all duration-200 shadow-sm
@@ -1195,6 +1245,107 @@ export default function AIPlannerPage() {
           </div>
         </div>
       )}
+      {/* ── User Routine Modal ─────────────────────────────────────────────── */}
+      {showRoutineModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">My Daily Routine</h2>
+                <p className="text-sm text-gray-500 mt-0.5">AI will schedule tasks around your real hours</p>
+              </div>
+              <button onClick={() => setShowRoutineModal(false)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Occupation */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">I am a</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { value: "student", label: "🎓 Student" },
+                    { value: "professional", label: "💼 Professional" },
+                    { value: "freelancer", label: "💻 Freelancer" },
+                    { value: "other", label: "✨ Other" },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setRoutine(r => ({ ...r, occupation: opt.value, busyLabel: opt.value === "student" ? "College" : opt.value === "professional" ? "Work" : opt.value === "freelancer" ? "Work" : "Busy" }))}
+                      className={`py-2.5 px-3 rounded-xl text-sm font-medium border transition-colors ${routine.occupation === opt.value ? "bg-violet-600 text-white border-violet-600" : "bg-gray-50 text-gray-700 border-gray-200 hover:border-violet-300"}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Wake / Sleep */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">🌅 Wake up</label>
+                  <input type="time" value={routine.wakeTime} onChange={e => setRoutine(r => ({ ...r, wakeTime: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">🌙 Sleep at</label>
+                  <input type="time" value={routine.sleepTime} onChange={e => setRoutine(r => ({ ...r, sleepTime: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                </div>
+              </div>
+
+              {/* Busy block toggle */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    {routine.occupation === "student" ? "🏫 College hours" : "🏢 Work hours"}
+                  </label>
+                  <button
+                    onClick={() => setRoutine(r => ({ ...r, hasBusy: !r.hasBusy }))}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${routine.hasBusy ? "bg-violet-600" : "bg-gray-200"}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${routine.hasBusy ? "translate-x-5" : ""}`} />
+                  </button>
+                </div>
+                {routine.hasBusy && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Start</label>
+                      <input type="time" value={routine.busyStart} onChange={e => setRoutine(r => ({ ...r, busyStart: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">End</label>
+                      <input type="time" value={routine.busyEnd} onChange={e => setRoutine(r => ({ ...r, busyEnd: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              <div className="bg-violet-50 rounded-xl p-3 text-xs text-violet-700">
+                <span className="font-semibold">AI will schedule tasks: </span>
+                {routine.wakeTime} – {routine.hasBusy ? `${routine.busyStart} (before ${routine.busyLabel || "busy"})` : routine.sleepTime}
+                {routine.hasBusy && ` and ${routine.busyEnd} – ${routine.sleepTime} (after ${routine.busyLabel || "busy"})`}
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowRoutineModal(false)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={saveRoutine} disabled={routineSaving}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity">
+                {routineSaving ? "Saving..." : "Save Routine"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </BackgroundLayout>
   );
 }
