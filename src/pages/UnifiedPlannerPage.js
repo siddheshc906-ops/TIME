@@ -153,7 +153,15 @@ export const UnifiedPlannerPage = () => {
         if (Array.isArray(serverTasks)) {
           // Server is the single source of truth — wipe localStorage and use server data
           localStorage.removeItem("todo-tasks");
-          const sorted = [...serverTasks].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          // ✅ FIX: Deduplicate by _id before setting — prevents duplicate display
+          const seen = new Set();
+          const unique = serverTasks.filter(t => {
+            const key = t._id || t.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          const sorted = [...unique].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
           setTasks(sorted);
         }
         setSyncStatus("synced");
@@ -249,6 +257,10 @@ export const UnifiedPlannerPage = () => {
       return;
     }
 
+    // ✅ FIX: Prevent double-submission — if already adding, ignore extra clicks
+    if (isAdding) return;
+    setIsAdding(true);
+
     const tempId = `temp_${Date.now()}`;
     const newTaskObj = {
       _id: tempId,
@@ -267,8 +279,8 @@ export const UnifiedPlannerPage = () => {
     toast.success("Task added!");
     inputRef.current?.focus();
 
-    // Background sync — real ID replacement happens inside backgroundSync
-    backgroundSync("add", newTaskObj);
+    // Background sync — unlock button after sync completes
+    backgroundSync("add", newTaskObj).finally(() => setIsAdding(false));
   }
 
   // ── Delete task (immediate UI update + background sync) ───────────────────
