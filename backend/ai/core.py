@@ -307,7 +307,8 @@ JSON FORMAT REFERENCE:
             logger.error(f"process_message error: {e}", exc_info=True)
             return {
                 "type": "chat",
-                "message": "I ran into a small issue. Please try again!",
+                # ✅ FIX: clearer error with actionable retry suggestion
+                "message": "Something went wrong on my end — it's not you! Please try sending your message again.",
                 "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
             }
 
@@ -434,6 +435,8 @@ JSON FORMAT REFERENCE:
         user_prompt: str,
         extra_system: str = "",
         max_tokens: int = 1000,
+        conversation_history: list = [],  # ✅ FIX: accept history
+        retries: int = 3,                 # ✅ FIX: retry on failure
     ) -> Dict[str, Any]:
         if not USE_GEMINI or not self.client:
             logger.warning("Gemini not available - returning fallback response")
@@ -446,69 +449,91 @@ JSON FORMAT REFERENCE:
             }
 
         system = self._build_system_prompt(extra=extra_system)
-        full_prompt = f"{system}\n\nUser: {user_prompt}"
 
-        try:
-            response = self.client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    max_output_tokens=max_tokens,
-                    temperature=0.7,
-                ),
-            )
-            raw = response.text.strip()
+        # ✅ FIX: Build prompt with conversation history for full context
+        history_text = ""
+        if conversation_history:
+            history_lines = []
+            for turn in conversation_history[-6:]:  # last 6 turns max
+                role = "User" if turn.get("role") == "user" else "Assistant"
+                history_lines.append(f"{role}: {turn.get('content', '')}")
+            history_text = "\n".join(history_lines) + "\n"
 
-            # Log first 200 chars for debugging
-            logger.debug(f"Gemini raw response: {raw[:200]}...")
+        full_prompt = f"{system}\n\n{history_text}User: {user_prompt}"
 
-            # Strip any accidental markdown fences
-            if raw.startswith("```"):
-                parts = raw.split("```")
-                raw = parts[1] if len(parts) > 1 else raw
-                if raw.startswith("json"):
-                    raw = raw[4:]
-            raw = raw.strip()
+        last_error = None
+        for attempt in range(retries):  # ✅ FIX: retry loop
+            try:
+                response = self.client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=0.7,
+                    ),
+                )
+                raw = response.text.strip()
 
-            # Parse JSON
-            result = json.loads(raw)
+                # Log first 200 chars for debugging
+                logger.debug(f"Gemini raw response: {raw[:200]}...")
 
-            # Ensure required fields exist
-            if "type" not in result:
-                result["type"] = "chat"
-            if "message" not in result:
-                result["message"] = "I've processed your request."
-            if "suggestions" not in result:
-                result["suggestions"] = ["Plan my day", "Give me advice", "Show my progress"]
+                # Strip any accidental markdown fences
+                if raw.startswith("```"):
+                    parts = raw.split("```")
+                    raw = parts[1] if len(parts) > 1 else raw
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                raw = raw.strip()
 
-            return result
+                # Parse JSON
+                result = json.loads(raw)
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Gemini JSON parse failed: {e}")
-            logger.error(f"Raw response: {raw[:500]}")
-            # Return a fallback schedule using NLP extraction
-            tasks = self.nlp.extract_tasks(user_prompt)
-            if tasks:
-                schedule = self._create_simple_schedule(tasks)
+                # Ensure required fields exist
+                if "type" not in result:
+                    result["type"] = "chat"
+                if "message" not in result:
+                    result["message"] = "I've processed your request."
+                if "suggestions" not in result:
+                    result["suggestions"] = ["Plan my day", "Give me advice", "Show my progress"]
+
+                return result
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Gemini JSON parse failed (attempt {attempt+1}): {e}")
+                last_error = e
+                # On last attempt, try NLP fallback
+                if attempt == retries - 1:
+                    tasks = self.nlp.extract_tasks(user_prompt)
+                    if tasks:
+                        schedule = self._create_simple_schedule(tasks)
+                        return {
+                            "type": "schedule",
+                            "message": f"✅ Created schedule with {len(tasks)} tasks!",
+                            "tasks_found": [t["name"] for t in tasks],
+                            "schedule": schedule,
+                            "insights": ["✨ Tasks scheduled with 15-min breaks"]
+                        }
+                    return {
+                        "type": "chat",
+                        "message": "I'm having trouble understanding. Could you rephrase?",
+                        "suggestions": ["Plan my day: study 2 hours, gym 1 hour", "Give me advice"],
+                    }
+                import time as _time
+                _time.sleep(1)  # brief wait before retry
+                continue
+
+            except Exception as e:
+                logger.error(f"_call_ai error (attempt {attempt+1}): {e}", exc_info=True)
+                last_error = e
+                if attempt < retries - 1:
+                    import time as _time
+                    _time.sleep(1)
+                    continue
                 return {
-                    "type": "schedule",
-                    "message": f"✅ Created schedule with {len(tasks)} tasks!",
-                    "tasks_found": [t["name"] for t in tasks],
-                    "schedule": schedule,
-                    "insights": ["✨ Tasks scheduled with 15-min breaks"]
+                    "type": "chat",
+                    "message": "Something went wrong. Please try again.",
+                    "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
                 }
-            return {
-                "type": "chat",
-                "message": "I'm having trouble understanding. Could you rephrase?",
-                "suggestions": ["Plan my day: study 2 hours, gym 1 hour", "Give me advice"],
-            }
-        except Exception as e:
-            logger.error(f"_call_ai error: {e}", exc_info=True)
-            return {
-                "type": "chat",
-                "message": "Something went wrong. Please try again.",
-                "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
-            }
 
     # ── Simple schedule creator (fallback) ─────────────────────────────────────
     def _create_simple_schedule(self, tasks: List[Dict]) -> List[Dict]:
