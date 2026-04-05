@@ -28,7 +28,8 @@ _STOP_WORDS = {
 # ── Cleanup prefixes that sneak into task names ────────────────────────────────
 _NAME_PREFIX_RE = re.compile(
     r"^[\s:,\-]+|"
-    r"^\s*(also|plus|then|after\s+that|i\s+have\s+to|i\s+need\s+to|i\s+want\s+to"
+    r"^\s*(and\s+then|and\s+also|also\s+then|and|also|plus|then|after\s+that"
+    r"|i\s+have\s+to|i\s+need\s+to|i\s+want\s+to"
     r"|need\s+to|have\s+to|want\s+to|going\s+to|gonna|will)\s+",
     re.IGNORECASE,
 )
@@ -104,42 +105,81 @@ class NLProcessor:
         """
         Main entry point. Returns a list of task dicts:
         {name, duration, start_time, end_time, priority, difficulty, category, optimal_slot}
+
+        Pre-splits the input on "and then", "then", "and" connectors so that
+        each segment is processed independently — preventing names like
+        "Then practice dsa" or tasks being merged/missed.
         """
+        # ── Step 1: Strip scheduling preamble ────────────────────────────────
         cleaned = re.sub(
             r"^\s*(plan|schedule|create|organize|set up|make)\s+"
             r"(my\s+)?(day|tasks?|schedule|plan)[\s:,-]*",
             "", text, flags=re.IGNORECASE,
         ).strip()
 
-        tasks: List[Dict] = []
-        used_spans: List[tuple] = []
+        # ── Step 2: Also strip leading personal preamble ─────────────────────
+        # e.g. "i have to do X ..." → "do X ..."
+        cleaned = re.sub(
+            r"^\s*(?:i\s+(?:have|need|want|am\s+going)\s+to\s+|"
+            r"i\s+(?:will|should|must|got\s+to)\s+)+",
+            "", cleaned, flags=re.IGNORECASE,
+        ).strip()
 
-        # Pass 1: fixed time ranges ("X from H to H")
-        self._extract_time_range_tasks(cleaned, tasks, used_spans)
+        # ── Step 3: Check if the text contains "and then" / "then" connectors ─
+        # If so, pre-split into independent segments and process each one.
+        # This prevents Pattern 1 in _extract_duration_tasks from greedily
+        # capturing "X for 1 hour AND THEN Y for 3 hours" as a single name.
+        _CONNECTOR_SPLIT = re.compile(
+            r"\s*,\s*and\s+then\s+|\s+and\s+then\s+|\s*,\s*then\s+|\s+then\s+"
+            r"|\s*,\s*and\s+|\s+and\s+|\s*[,;]\s*",
+            re.IGNORECASE,
+        )
+        # Only pre-split if there are multiple duration mentions (multi-task sentence)
+        duration_count = len(re.findall(
+            r"\d+(?:\.\d+)?\s*(?:hours?|hrs?|h\b|minutes?|mins?|min\b)",
+            cleaned, re.IGNORECASE,
+        ))
 
-        # Pass 2: "at Hpm for Yh" (single anchor + duration)
-        self._extract_anchored_tasks(cleaned, tasks, used_spans)
+        if duration_count > 1:
+            # Pre-split into segments and process each independently
+            segments = _CONNECTOR_SPLIT.split(cleaned)
+            all_tasks: List[Dict] = []
+            for seg in segments:
+                seg = seg.strip()
+                if not seg or len(seg) < 2:
+                    continue
+                # Strip any leftover connector words at the start of each segment
+                seg = _NAME_PREFIX_RE.sub("", seg).strip(" ,.-")
+                if not seg:
+                    continue
+                seg_tasks: List[Dict] = []
+                seg_used: List[tuple] = []
+                self._extract_time_range_tasks(seg, seg_tasks, seg_used)
+                self._extract_anchored_tasks(seg, seg_tasks, seg_used)
+                self._extract_duration_tasks(seg, seg_tasks, seg_used)
+                self._extract_plain_tasks(seg, seg_tasks, seg_used)
+                all_tasks.extend(seg_tasks)
+            tasks = all_tasks
+        else:
+            # Single task or no connectors — use original multi-pass approach
+            tasks = []
+            used_spans: List[tuple] = []
+            self._extract_time_range_tasks(cleaned, tasks, used_spans)
+            self._extract_anchored_tasks(cleaned, tasks, used_spans)
+            self._extract_duration_tasks(cleaned, tasks, used_spans)
+            self._extract_plain_tasks(cleaned, tasks, used_spans)
 
-        # Pass 3: duration-only ("X for Y hours/minutes") - MOST IMPORTANT
-        self._extract_duration_tasks(cleaned, tasks, used_spans)
-
-        # Pass 4: plain comma/and-separated segments with no time info
-        self._extract_plain_tasks(cleaned, tasks, used_spans)
-
-        # Enrich every task with category, difficulty, priority, optimal_slot
+        # ── Step 4: Enrich every task ─────────────────────────────────────────
         for t in tasks:
             cat = self.categorize_task(t["name"])
             t["category"] = cat
             t.setdefault("difficulty", self.estimate_difficulty(t["name"]))
             t.setdefault("priority", self.estimate_priority(t["name"]))
 
-            # IMPORTANT: Only set default duration if NO duration was specified
-            # If duration is 0 (meaning no duration found), use default
-            # If duration > 0, keep the user-specified value
+            # Keep user-specified duration; apply default only if none found
             if t.get("duration", 0) == 0:
                 t["duration"] = _CATEGORY_DEFAULT_DURATIONS.get(cat, 1.0)
             else:
-                # User specified a duration, keep it as is
                 t["duration"] = round(t["duration"], 1)
 
             # Inject optimal_slot so scheduler can use it
