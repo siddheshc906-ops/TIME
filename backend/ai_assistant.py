@@ -159,17 +159,13 @@ class AIAssistant:
     
     async def process_message(self, message: str) -> Dict[str, Any]:
         """
-        Main entry point with SmartBrain pre-processing.
-
-        The SmartBrain prevents:
-        - Greetings ("Hi") being scheduled as tasks
-        - Casual chat triggering the scheduler
-        - Ambiguous single words being blindly scheduled
-        - Context messages ("I have holiday") being mishandled
+        Main entry point — smart conversational AI that understands context,
+        not just keywords. Handles vague, emotional, and multi-intent messages.
         """
         try:
             from datetime import datetime as _dt
             today_str = _dt.now().date().isoformat()
+            msg_lower = message.lower().strip()
 
             # ── Get existing schedule status for context ───────────────────────
             existing_plan = await self.db.daily_plans.find_one(
@@ -177,15 +173,8 @@ class AIAssistant:
             )
             has_schedule = bool((existing_plan or {}).get("schedule"))
 
-            # ── SmartBrain pre-processing ──────────────────────────────────────
-            if self.brain:
-                brain_result = await self.brain.pre_process(message, has_schedule)
-                if brain_result["action"] == "respond":
-                    # SmartBrain handled it — no scheduling needed
-                    return brain_result["response"]
-                # SmartBrain says "proceed" — message is a real task/schedule intent
-
-            # ── Check for daily check-in reply ────────────────────────────────
+            # ── 0. Check for pending follow-up context FIRST ──────────────────
+            # (user is replying to a question the AI asked)
             pending_doc = None
             try:
                 pending_doc = await self.db.user_pending_context.find_one(
@@ -199,21 +188,47 @@ class AIAssistant:
                     "free all day", "just schedule it", "no college",
                     "no school", "college from", "school from", "work from",
                     "busy from", "free from", "free after", "i'm free", "i am free",
-                    "free all", "whole day free",
+                    "free all", "whole day free", "free till", "free until",
+                    "am free", "till", "until", "after",
                 ]
-                if any(p in message.lower() for p in _checkin_reply_phrases):
+                if any(p in msg_lower for p in _checkin_reply_phrases):
                     return await self._get_pending_tasks_and_schedule(message)
 
-            # ── Route by intent ───────────────────────────────────────────────
+            # ── 1. Smart context detection BEFORE SmartBrain can block it ─────
+            # Catch high-intent messages that look like chat but carry scheduling need
+            smart_context = self._detect_smart_context(msg_lower)
+            if smart_context:
+                return await self._handle_smart_context(message, smart_context, today_str)
+
+            # ── 2. Routine / day structure messages ───────────────────────────
+            _routine_phrases = [
+                "i have college", "i have school", "i have work", "i have class",
+                "my college is", "my school is", "my work is",
+                "i wake up", "i sleep at", "i finish at", "i get home",
+                "my lunch", "my dinner", "my break",
+                "my day starts", "my day ends", "i'm free from", "i am free from",
+                "blocked from", "busy from", "not available",
+                "tell you my routine", "my routine is",
+                "i study from", "i work from",
+                "plan around it", "plan around my", "schedule around",
+            ]
+            if any(p in msg_lower for p in _routine_phrases):
+                return await self._parse_and_save_routine(message)
+
+            # ── 3. SmartBrain pre-processing (greetings, pure chat) ───────────
+            if self.brain:
+                brain_result = await self.brain.pre_process(message, has_schedule)
+                if brain_result["action"] == "respond":
+                    return brain_result["response"]
+
+            # ── 4. Route by intent ────────────────────────────────────────────
             intent = await self._detect_intent(message)
             logger.info(f"Detected intent: {intent} for message: '{message[:60]}'")
 
             if intent == IntentType.ADD_TASK:
                 return await self._handle_add_task(message)
-
             if intent == IntentType.MODIFY_SCHEDULE:
                 return await self._parse_and_save_routine(message)
-
             if intent == IntentType.CREATE_SCHEDULE:
                 return await self._create_schedule_with_nlp(message)
 
@@ -231,7 +246,386 @@ class AIAssistant:
                     "Give me productivity tips",
                 ],
             }
-    
+
+    def _detect_smart_context(self, msg: str) -> Optional[str]:
+        """
+        Detects high-intent contextual messages that look conversational
+        but actually carry a scheduling / study need.
+        Returns a context tag string or None.
+        """
+        # Exam / test urgency
+        if any(w in msg for w in ["exam", "test", "quiz", "viva", "finals", "boards"]):
+            return "exam"
+
+        # Deadline urgency
+        if any(w in msg for w in ["deadline", "due tomorrow", "submit", "assignment due",
+                                    "project due", "presentation tomorrow"]):
+            return "deadline"
+
+        # Study intent without explicit task format
+        if any(w in msg for w in ["want to study", "need to study", "have to study",
+                                    "wanna study", "start studying", "study from now",
+                                    "study today", "study tonight", "study session"]):
+            return "study_intent"
+
+        # Feeling overwhelmed / too much to do
+        if any(w in msg for w in ["overwhelmed", "too much", "so much to do", "dont know where to start",
+                                    "don't know where to start", "help me plan", "stressed about",
+                                    "backlog", "piled up", "cant manage", "can't manage"]):
+            return "overwhelmed"
+
+        # Free time / available now
+        if any(w in msg for w in ["i'm free", "i am free", "free now", "free today",
+                                    "nothing to do", "free time", "got time", "have time"]):
+            return "free_time"
+
+        # Productivity / motivation intent
+        if any(w in msg for w in ["be productive", "productive today", "make today productive",
+                                    "use my time", "not waste time", "make the most"]):
+            return "productive_intent"
+
+        return None
+
+    async def _handle_smart_context(self, message: str, context: str, today_str: str) -> Dict[str, Any]:
+        """Handles contextual messages smartly — asks the right follow-up and builds science-backed schedules."""
+        msg_lower = message.lower()
+
+        day_ctx    = await self._get_day_context(today_str)
+        day_start  = self._dec_to_str(day_ctx.get("day_start", 16.25))
+        day_end    = self._dec_to_str(day_ctx.get("day_end", 23.0))
+        free_hours = round(day_ctx.get("day_end", 23.0) - day_ctx.get("day_start", 16.25), 1)
+        has_saved_routine = day_ctx.get("has_custom", False)
+
+        subject_patterns = [
+            "physics", "maths", "math", "chemistry", "biology", "english",
+            "history", "geography", "science", "computer", "accounts", "economics",
+            "hindi", "sanskrit", "french", "german", "literature", "civics",
+            "coding", "programming", "python", "java", "dsa", "algorithms",
+        ]
+        mentioned_subjects = [s for s in subject_patterns if s in msg_lower]
+
+        mentions_tonight = any(w in msg_lower for w in ["tonight", "now", "from now", "right now", "immediately"])
+
+        if context == "exam":
+            if "tomorrow" in msg_lower:
+                urgency = "tomorrow"
+                urgency_label = "tomorrow"
+            elif any(w in msg_lower for w in ["today", "tonight", "now"]):
+                urgency = "today"
+                urgency_label = "today"
+            else:
+                days_match = re.search(r"in (\d+) days?", msg_lower)
+                urgency = ("in " + days_match.group(1) + " days") if days_match else "soon"
+                urgency_label = urgency
+
+            if mentioned_subjects:
+                subjects_str = ", ".join(s.title() for s in mentioned_subjects)
+                if has_saved_routine:
+                    return await self._build_exam_schedule(
+                        subjects=mentioned_subjects,
+                        urgency=urgency,
+                        free_start=day_ctx.get("day_start", 16.25),
+                        free_end=day_ctx.get("day_end", 23.0),
+                        message=message,
+                    )
+                else:
+                    await self._save_smart_pending(today_str, {
+                        "context": "exam",
+                        "subjects": mentioned_subjects,
+                        "urgency": urgency,
+                        "original_msg": message,
+                    })
+                    msg_text = (
+                        "Noted — covering " + subjects_str + " before your exam " + urgency_label + ".\n\n"
+                        "📅 What is your available study window today?\n\n"
+                        "Give me a start and end time so I can build your sessions accurately:\n"
+                        "e.g. '3 PM to 10 PM' or 'Free from 5 PM till 11 PM'"
+                    )
+                    return {
+                        "type": "checkin",
+                        "message": msg_text,
+                        "suggestions": ["3 PM to 10 PM", "Free from 5 PM to 11 PM", "Free all evening till midnight"],
+                        "pending_tasks": mentioned_subjects,
+                    }
+            else:
+                await self._save_smart_pending(today_str, {
+                    "context": "exam",
+                    "urgency": urgency,
+                    "original_msg": message,
+                })
+                msg_text = (
+                    "Exam " + urgency_label + " — let's build a revision plan that actually works.\n\n"
+                    "📚 What subjects do you need to cover, and how much time for each?\n\n"
+                    "List them with rough hours so I can schedule optimally:\n"
+                    "e.g. 'Physics 2h, Maths 1.5h, Chemistry 1h'"
+                )
+                return {
+                    "type": "chat",
+                    "message": msg_text,
+                    "suggestions": [
+                        "Physics 2h, Maths 1.5h, Chemistry 1h",
+                        "Maths 2h and Science 2h",
+                        "All subjects, 6 hours total",
+                    ],
+                }
+
+        elif context == "study_intent":
+            if mentioned_subjects and has_saved_routine:
+                return await self._build_exam_schedule(
+                    subjects=mentioned_subjects,
+                    urgency="today",
+                    free_start=day_ctx.get("day_start", 16.25),
+                    free_end=day_ctx.get("day_end", 23.0),
+                    message=message,
+                )
+            elif mentioned_subjects:
+                subjects_str = ", ".join(s.title() for s in mentioned_subjects)
+                await self._save_smart_pending(today_str, {
+                    "context": "study_intent",
+                    "subjects": mentioned_subjects,
+                    "original_msg": message,
+                })
+                msg_text = (
+                    "Good — scheduling " + subjects_str + " for today.\n\n"
+                    "📅 What is your available study window?\n\n"
+                    "Tell me your start and end time so I can build your plan precisely:\n"
+                    "e.g. '4 PM to 10 PM' or 'Free from 6 PM till midnight'"
+                )
+                return {
+                    "type": "checkin",
+                    "message": msg_text,
+                    "suggestions": ["4 PM to 10 PM", "Free from 5 PM to 11 PM", "Free all day"],
+                    "pending_tasks": mentioned_subjects,
+                }
+            else:
+                await self._save_smart_pending(today_str, {
+                    "context": "study_intent",
+                    "original_msg": message,
+                })
+                return {
+                    "type": "chat",
+                    "message": (
+                        "Let's set up your study session.\n\n"
+                        "📚 What do you want to cover today, and how long for each subject?\n\n"
+                        "e.g. 'Physics 2h, Maths 1.5h, Chemistry 1h'\n\n"
+                        "Once I have that, I'll ask for your available time window and build a focused plan with Pomodoro breaks built in."
+                    ),
+                    "suggestions": [
+                        "Physics 2h and Maths 1.5h",
+                        "Chemistry 1h, Biology 1h, Maths 2h",
+                        "All subjects, roughly 5 hours",
+                    ],
+                }
+
+        elif context == "deadline":
+            await self._save_smart_pending(today_str, {
+                "context": "deadline",
+                "original_msg": message,
+            })
+            return {
+                "type": "chat",
+                "message": (
+                    "Deadline pressure — let's tackle it right now! \u26a1\n\n"
+                    "Tell me what needs to be done and how much time you have, "
+                    "and I'll build a focused plan that gets it done.\n\n"
+                    "e.g. 'Assignment on Economics, 3 hours available' or 'Project due tomorrow, free from 5 PM'"
+                ),
+                "suggestions": [
+                    "Assignment due, free from 5 PM",
+                    "Project work 3 hours",
+                    "Essay writing, free all evening",
+                ],
+            }
+
+        elif context == "overwhelmed":
+            await self._save_smart_pending(today_str, {
+                "context": "overwhelmed",
+                "original_msg": message,
+            })
+            return {
+                "type": "chat",
+                "message": (
+                    "I hear you — let's cut through the noise together. \U0001f9d8\n\n"
+                    "The trick is to stop trying to do everything and pick 3 things that actually matter today.\n\n"
+                    "What's piling up? Just dump everything here and I'll sort it into a realistic, "
+                    "prioritised plan you can actually finish.\n\n"
+                    "e.g. 'Maths assignment, Physics revision, Chemistry notes, gym, read 30 pages'"
+                ),
+                "suggestions": [
+                    "Maths, Physics, Chemistry to study",
+                    "Assignment + revision + gym",
+                    "List my tasks and help prioritise",
+                ],
+            }
+
+        elif context == "free_time":
+            if has_saved_routine:
+                return {
+                    "type": "chat",
+                    "message": (
+                        "Nice — free time is precious! \U0001f31f You're free from " + day_start
+                        + " with about " + str(free_hours) + "h available.\n\n"
+                        "What do you want to use it for? I'll build a productive schedule around it.\n\n"
+                        "e.g. 'Study Physics and Maths' or 'Gym + reading + revision'"
+                    ),
+                    "suggestions": [
+                        "Study Physics and Maths",
+                        "Gym + reading + revision",
+                        "Work on my project",
+                    ],
+                }
+            else:
+                return {
+                    "type": "chat",
+                    "message": (
+                        "Great — let's make the most of your free time! \U0001f4aa\n\n"
+                        "What do you want to do? Tell me your tasks and I'll build a smart, productive schedule.\n\n"
+                        "e.g. 'Study Maths 2h, gym 45min, read 30min'"
+                    ),
+                    "suggestions": [
+                        "Study Maths 2h and Physics 1h",
+                        "Gym 45min, read 1h, revision 2h",
+                        "Work on project for 3 hours",
+                    ],
+                }
+
+        elif context == "productive_intent":
+            if has_saved_routine:
+                return {
+                    "type": "chat",
+                    "message": (
+                        "Love the mindset! \U0001f525 You have " + str(free_hours)
+                        + "h free from " + day_start + ".\n\n"
+                        "What's on your plate today? Give me your tasks and I'll schedule them in the most "
+                        "productive order — hardest tasks when your energy is highest, lighter ones later.\n\n"
+                        "e.g. 'Physics 2h, Maths 1h, revision 1h, gym 45min'"
+                    ),
+                    "suggestions": [
+                        "Physics 2h, Maths 1h, gym 45min",
+                        "Study + gym + reading",
+                        "Full productive day plan",
+                    ],
+                }
+            else:
+                return {
+                    "type": "chat",
+                    "message": (
+                        "Love the mindset — let's build a killer day! \U0001f680\n\n"
+                        "Two quick things:\n"
+                        "1. What tasks do you want to do today?\n"
+                        "2. When are you free? (so I schedule at the right time)\n\n"
+                        "e.g. 'Physics 2h, Maths 1h, gym 45min, free from 4 PM'"
+                    ),
+                    "suggestions": [
+                        "Physics 2h, Maths 1h, free from 4 PM",
+                        "Gym + study, free all day",
+                        "Plan my whole day",
+                    ],
+                }
+
+        return await self._enhanced_general_chat(message)
+
+
+    async def _save_smart_pending(self, today_str: str, data: Dict) -> None:
+        """Save pending smart context so next user reply can continue the flow."""
+        try:
+            await self.db.user_pending_context.update_one(
+                {"user_id": self.user_id},
+                {"$set": {
+                    "user_id": self.user_id,
+                    "smart_context": data,
+                    "date": today_str,
+                    "pending_tasks": data.get("subjects", []),
+                    "original_msg": data.get("original_msg", ""),
+                }},
+                upsert=True,
+            )
+        except Exception as e:
+            logger.error(f"Could not save smart pending: {e}")
+
+    async def _build_exam_schedule(
+        self, subjects: List[str], urgency: str,
+        free_start: float, free_end: float, message: str
+    ) -> Dict[str, Any]:
+        """Build a science-backed exam study schedule using spaced repetition, Pomodoro blocks, and interleaving."""
+        total_free = free_end - free_start
+        n = len(subjects)
+        if n == 0:
+            return await self._enhanced_general_chat(message)
+
+        time_per_subject = min(2.0, max(0.75, round(total_free / n, 1)))
+        usable_end = free_end - 0.5
+
+        schedule = []
+        cursor = free_start
+
+        for i, subject in enumerate(subjects):
+            if cursor + time_per_subject > usable_end:
+                break
+            start_str = self._dec_to_str(cursor)
+            end_time  = cursor + time_per_subject
+            end_str   = self._dec_to_str(end_time)
+            schedule.append({
+                "task":         "Study " + subject.title(),
+                "start_time":   cursor,
+                "end_time":     end_time,
+                "time":         start_str + " - " + end_str,
+                "duration":     time_per_subject,
+                "priority":     "high",
+                "category":     "study",
+                "energy_score": 0.9 if i == 0 else 0.7,
+            })
+            cursor = end_time
+
+            if i < n - 1 and cursor + 0.167 <= usable_end:
+                break_end = cursor + 0.167
+                schedule.append({
+                    "task":       "Short break",
+                    "start_time": cursor,
+                    "end_time":   break_end,
+                    "time":       self._dec_to_str(cursor) + " - " + self._dec_to_str(break_end),
+                    "duration":   0.167,
+                    "type":       "break",
+                    "priority":   "low",
+                })
+                cursor = break_end
+
+        if cursor + 0.5 <= usable_end:
+            schedule.append({
+                "task":       "Quick Revision & Notes Review",
+                "start_time": cursor,
+                "end_time":   cursor + 0.5,
+                "time":       self._dec_to_str(cursor) + " - " + self._dec_to_str(cursor + 0.5),
+                "duration":   0.5,
+                "priority":   "high",
+                "category":   "study",
+            })
+
+        subjects_str = ", ".join(s.title() for s in subjects)
+        study_hours  = round(sum(s["duration"] for s in schedule if s.get("category") == "study"), 1)
+
+        science_tips = [
+            "Interleaving: switching between " + subjects_str + " boosts long-term retention by up to 43% vs studying one subject for hours.",
+            "50/10 rule: each session is ~50 min focused study + 10 min break to prevent mental fatigue.",
+            "Sleep = memory: whatever you study last before sleep gets consolidated most strongly. Keep the final revision light.",
+        ]
+        if urgency == "tomorrow":
+            science_tips.insert(0, "Exam tomorrow: focus on high-yield topics — past paper patterns, formulas, key definitions. Do not start new chapters tonight.")
+
+        if urgency == "tomorrow":
+            msg_out = "Exam tomorrow! Here is your optimised last-day revision plan for " + subjects_str + ":"
+        else:
+            msg_out = "Built your exam study plan for " + subjects_str + " — " + str(study_hours) + "h of focused revision!"
+
+        return {
+            "type":        "schedule",
+            "message":     msg_out,
+            "tasks_found": ["Study " + s.title() for s in subjects],
+            "schedule":    schedule,
+            "insights":    science_tips,
+        }
+
+
     async def _create_schedule_with_nlp(self, message: str) -> Dict[str, Any]:
         """Create schedule using NLP for task extraction"""
         
@@ -801,7 +1195,7 @@ Respond with:
             assumed_start = self._dec_to_str(ctx.get("day_start", 16.0))
             note = (
                 f"Based on your past {weekday}s I'll assume you're free from "
-                f"around **{assumed_start}** — but is that right today?"
+                f"around {assumed_start} — but is that right today?"
             )
         elif is_assumed:
             note = (
@@ -816,15 +1210,15 @@ Respond with:
 
         newline = "\n"
         checkin_msg = (
-            f"Got it \u2014 I'll schedule **{task_list}** for you. "
+            f"Got it \u2014 I'll schedule {task_list} for you. "
             + note
             + newline + newline
-            + f"**What does your {weekday} look like today?**" + newline
+            + f"📅 What does your {weekday} look like today?" + newline
             + "Just tell me in one line, e.g.:" + newline
             + "\u2022 'College 9 AM to 2 PM, free after that'" + newline
             + "\u2022 'Free all day'" + newline
             + "\u2022 'Work from 10 to 6, dinner at 7'" + newline + newline
-            + "Or say **'just schedule it'** and I'll use my best guess!"
+            + "Or just say 'just schedule it' and I'll use my best guess!"
         )
         return {
             "type":    "checkin",
@@ -923,8 +1317,8 @@ Respond with:
                 h += 12
             elif period == 'am' and h == 12:
                 h = 0
-            elif not period and h < 7:
-                h += 12  # assume PM for ambiguous afternoon hours
+            elif not period:
+                pass  # 24h value is already correct — no conversion needed
             return h + mn / 60
 
         msg = message.lower()
@@ -935,7 +1329,8 @@ Respond with:
             r'(?:college|school|work|class|office|meeting|gym|coaching)\s+(?:from\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|-|until|–)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
             r'(?:busy|blocked|not available|unavailable)\s+(?:from\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*(?:to|-|until)\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)',
         ]
-        blocked_slots = list(ctx.get("blocked_slots", []))
+        # Always start fresh — replace any old/default slots with what user just said
+        blocked_slots = []
         labels = ["college", "school", "work", "class", "office", "meeting", "gym", "coaching", "busy", "blocked"]
 
         for pattern in blocked_patterns:
@@ -1009,21 +1404,39 @@ Respond with:
         day_end_str   = self._dec_to_str(ctx.get("day_end", 22.0))
         free_hours    = round(ctx.get("day_end", 22.0) - ctx.get("day_start", 9.0), 1)
 
+        # Build a clean, deduplicated summary - only show what was just parsed
+        clean_summary = []
+        seen = set()
+        for slot in blocked_slots:
+            key = (round(slot["start"], 2), round(slot["end"], 2))
+            if key not in seen:
+                seen.add(key)
+                clean_summary.append(
+                    f"• {slot['label'].title()}: {self._dec_to_str(slot['start'])} – {self._dec_to_str(slot['end'])}"
+                )
+        if ctx.get("lunch_start"):
+            clean_summary.append(f"• Lunch: {self._dec_to_str(ctx['lunch_start'])} – {self._dec_to_str(ctx['lunch_end'])}")
+
+        free_from = self._dec_to_str(ctx.get("day_start", 9.0))
+        free_hours_display = round(ctx.get("day_end", 22.0) - ctx.get("day_start", 9.0), 1)
+
+        summary_text = "\n".join(clean_summary) if clean_summary else f"• Free from {free_from}"
+
         return {
             "type":    "chat",
             "message": (
-                "✅ Got it! I've saved your daily routine. From now on I'll schedule your tasks "
-                "around your real day:\n\n"
-                + "\n".join(summary_parts)
-                + f"\n\n🕐 You have approximately {free_hours}h of free time available for tasks."
-                + "\n\nJust tell me what tasks you want to do and I'll fit them into your free slots!"
+                f"✅ Got it! I've saved your routine.\n\n"
+                f"{summary_text}\n"
+                f"• Free for tasks: from {free_from}\n\n"
+                f"You have ~{free_hours_display}h free today. "
+                f"Now tell me what to schedule and I'll fit it in! 📅"
             ),
             "routine_saved": True,
-            "free_hours": free_hours,
+            "free_hours": free_hours_display,
             "suggestions": [
-                "Plan my remaining tasks for today",
-                "I need to study Physics for 2 hours",
-                "Add meditation for 30 minutes",
+                "Study Physics 2 hours and Maths 1 hour",
+                "Add gym for 45 minutes",
+                "Study Chemistry 1.5 hours",
             ],
         }
 
@@ -1170,13 +1583,12 @@ Respond with:
             return None
 
     async def _save_day_context(self, ctx: Dict) -> None:
-        """Persist updated day context for this user."""
+        """Persist updated day context — full replace so stale blocked_slots never linger."""
         try:
-            ctx["user_id"] = self.user_id
-            ctx["has_custom"] = True
-            await self.db.user_day_context.update_one(
+            doc = {**ctx, "user_id": self.user_id, "has_custom": True}
+            await self.db.user_day_context.replace_one(
                 {"user_id": self.user_id},
-                {"$set": ctx},
+                doc,
                 upsert=True,
             )
         except Exception as e:
@@ -1635,78 +2047,107 @@ Respond with:
             return await self._handle_question(message)
     
     async def _enhanced_general_chat(self, message: str) -> Dict[str, Any]:
-        """
-        Last-resort handler. Before giving a generic response, make one more
-        attempt to treat the message as a task/schedule request — catches
-        anything the intent detector might have missed (e.g. very short messages,
-        typos, unusual phrasing).
-        """
-        # Final attempt: try to extract tasks from the message
-        tasks = await self._manual_extract_tasks(message)
-        if tasks:
-            # Managed to extract at least one task — treat as ADD_TASK
-            logger.info(f"General-chat fallback extracted tasks: {[t['name'] for t in tasks]}")
-            return await self._handle_add_task(message)
+        """Smart general chat — understands intent from natural language, not just keyword lists."""
+        msg = message.lower().strip()
 
-        # Genuinely a chat message — give a helpful contextual response
-        msg_lower = message.lower()
-
-        # Greetings
-        if any(g in msg_lower for g in ["hello", "hi", "hey", "good morning",
-                                         "good afternoon", "good evening"]):
-            try:
-                streak = await self._calculate_streak()
-                if streak > 0:
-                    return {
-                        "type": "chat",
-                        "message": f"Hey! You're on a {streak}-day streak 🔥 What are you working on today?",
-                        "suggestions": [
-                            "Study Physics 2 hours and Maths 1 hour",
-                            "Add meditation for 30 minutes",
-                            "Show me my productivity progress",
-                        ]
-                    }
-            except Exception:
-                pass
+        if any(msg == w or msg.startswith(w + " ") for w in ["hi", "hello", "hey", "hii", "helo"]):
             return {
                 "type": "chat",
-                "message": "Hey! 👋 What would you like to work on today? Just tell me your tasks and I'll schedule them for you.",
+                "message": (
+                    "Hey! I am your AI Productivity Coach. "
+                    "Tell me what is on your plate today and I will build a smart schedule around your free time. "
+                    "Or just describe your situation in your own words — I will figure out what you need."
+                ),
                 "suggestions": [
-                    "Study Physics 2 hours and Maths 1 hour",
-                    "Add meditation for 30 minutes",
-                    "Plan my day",
-                ]
+                    "I have exam tomorrow, help me study",
+                    "Study Physics 2h and Maths 1h",
+                    "I am free from 5 PM, plan my evening",
+                ],
             }
 
-        # Thanks
-        if any(t in msg_lower for t in ["thanks", "thank you", "thx", "ty"]):
+        if any(w in msg for w in ["thank", "thanks", "ty", "great", "perfect", "awesome", "nice", "done"]):
             return {
                 "type": "chat",
-                "message": "Happy to help! 🚀 Anything else you want to schedule or ask?",
+                "message": "You are all set! Come back whenever you need to plan your next session.",
                 "suggestions": [
+                    "Plan tomorrow study session",
+                    "Give me focus tips",
                     "Add another task",
-                    "Show my productivity tips",
-                ]
+                ],
             }
 
-        # Default — nudge toward scheduling
-        default_msg = (
-            "I can help you schedule tasks, track productivity, or give study tips!\n\n"
-            "Try saying something like:\n"
-            "\u2022 'Study Physics 2 hours'\n"
-            "\u2022 'Add meditation for 30 minutes'\n"
-            "\u2022 'Plan my day'"
-        )
+        if any(w in msg for w in ["help", "what can you", "what do you", "how do you work"]):
+            return {
+                "type": "chat",
+                "message": (
+                    "Here is what I can do for you:\n\n"
+                    "- Schedule tasks: tell me your tasks and time and I will plan your day\n"
+                    "- Exam prep: say exam tomorrow and I will build a revision plan\n"
+                    "- Free time planning: say I am free from 5 PM and I will fill it productively\n"
+                    "- Study tips: ask for focus or productivity advice\n"
+                    "- Habit analysis: ask how am I doing for insights\n\n"
+                    "Just talk to me naturally — I will understand!"
+                ),
+                "suggestions": [
+                    "I have exam tomorrow, help me study",
+                    "Study Physics 2h and Maths 1h",
+                    "Give me focus tips",
+                ],
+            }
+
+        if any(w in msg for w in ["stressed", "anxious", "nervous", "scared", "worried", "tired", "exhausted", "burnout"]):
+            return {
+                "type": "advice",
+                "message": "Take a breath — you have got this. Feeling overwhelmed usually means your to-do list is too vague, not too long.",
+                "advice_points": [
+                    "Write down everything in your head on paper — getting it out reduces anxiety immediately and lets you see it is manageable.",
+                    "Pick just ONE thing to start. Do not plan the whole day — just start the first 25 minutes on the most important task.",
+                    "7-8 hours of sleep is non-negotiable before an exam — it is when your brain consolidates everything you studied.",
+                ],
+                "suggestions": [
+                    "Help me plan what to study",
+                    "I have too much to do, help me prioritise",
+                    "Give me tips to focus better",
+                ],
+            }
+
+        if any(w in msg for w in ["bored", "nothing to do", "free", "got time", "have time"]):
+            return {
+                "type": "chat",
+                "message": (
+                    "Free time is an asset — let us use it well!\n\n"
+                    "What would you like to do? I can plan a productive study session, "
+                    "a workout and reading combo, or anything else you have in mind."
+                ),
+                "suggestions": [
+                    "Study Physics and Maths",
+                    "Gym + reading + revision",
+                    "Make today fully productive",
+                ],
+            }
+
+        smart = self._detect_smart_context(msg)
+        if smart:
+            from datetime import datetime as _dt
+            today_str = _dt.now().date().isoformat()
+            return await self._handle_smart_context(message, smart, today_str)
+
         return {
             "type": "chat",
-            "message": default_msg,
+            "message": (
+                "I am here to help you plan and stay productive!\n\n"
+                "Just tell me what you need — whether it is scheduling tasks, "
+                "preparing for an exam, or getting productivity tips. "
+                "I work best when you describe your situation naturally."
+            ),
             "suggestions": [
-                "Study Physics 2 hours and Maths 1 hour",
-                "Add meditation for 30 minutes",
-                "Give me productivity tips",
-            ]
+                "I have exam tomorrow, help me study",
+                "Study Physics 2h and Maths 1h",
+                "Give me tips to focus better",
+            ],
         }
-    
+
+
     async def _rule_based_processing(self, message: str) -> Dict[str, Any]:
         """Original rule-based processing - kept for backward compatibility"""
         intent = await self._detect_intent(message)
@@ -1754,6 +2195,7 @@ Respond with:
             "blocked from", "busy from", "not available",
             "tell you my routine", "my routine is",
             "i study from", "i work from",
+            "plan around it", "plan around my", "schedule around",
         ]
         if any(p in msg for p in _routine_phrases):
             return IntentType.MODIFY_SCHEDULE
@@ -1834,9 +2276,23 @@ Respond with:
         if _has_activity and len(words) > 2:
             return IntentType.ADD_TASK
 
-        # Explicit intent phrases
+        # ── Explicit scheduling intent phrases ───────────────────────────────
         if any(p in msg for p in ["i need to", "i have to", "plan", "schedule",
                                    "tasks for", "to do", "my day"]):
+            return IntentType.CREATE_SCHEDULE
+
+        # ── High-intent contextual phrases → CREATE_SCHEDULE ──────────────────
+        # These messages describe a need to study/work even without task format
+        _context_intent_phrases = [
+            "exam", "test tomorrow", "quiz tomorrow",
+            "want to study", "need to study", "have to study",
+            "wanna study", "study session", "study for it",
+            "study from now", "study today", "study tonight",
+            "deadline", "due tomorrow", "assignment due",
+            "help me plan", "plan my study", "revision plan",
+            "be productive", "productive today", "make today productive",
+        ]
+        if any(p in msg for p in _context_intent_phrases):
             return IntentType.CREATE_SCHEDULE
 
         return IntentType.GENERAL_CHAT
@@ -2459,7 +2915,7 @@ async def get_guidance_response(
         return {
             "success": True,
             "message": (
-                "📅 For scheduling and planning tasks, head to the **AI Planner** page — "
+                "📅 For scheduling and planning tasks, head to the AI Planner page — "
                 "that's where I build your full daily schedule. "
                 "Here on the Performance page I'm your Productivity Coach: "
                 "ask me about your stats, focus habits, improvement areas, or how to beat procrastination!"
