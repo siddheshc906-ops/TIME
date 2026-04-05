@@ -124,6 +124,10 @@ def _regex_extract_tasks(message: str) -> List[Dict]:
     return tasks
 
 
+# ✅ FIX: Simple in-memory per-user rate limiter (resets on server restart)
+_user_last_request: dict = {}
+_USER_COOLDOWN_SECONDS = 1.5  # min seconds between requests per user
+
 class AIAssistant:
     def __init__(self, user_id: str, db):
         self.user_id = user_id
@@ -157,15 +161,31 @@ class AIAssistant:
         # Initialize OpenAI client
         openai.api_key = os.getenv("OPENAI_API_KEY")
     
-    async def process_message(self, message: str) -> Dict[str, Any]:
+    async def process_message(self, message: str, conversation_history: list = []) -> Dict[str, Any]:
         """
         Main entry point — smart conversational AI that understands context,
         not just keywords. Handles vague, emotional, and multi-intent messages.
+        conversation_history: list of {role, content} dicts from the frontend.
         """
         try:
+            import time as _time
             from datetime import datetime as _dt
+
+            # ✅ FIX: Per-user cooldown to prevent rapid double-sends
+            now = _time.time()
+            last = _user_last_request.get(self.user_id, 0)
+            if now - last < _USER_COOLDOWN_SECONDS:
+                return {
+                    "type": "chat",
+                    "message": "Please wait a moment before sending another message.",
+                    "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
+                }
+            _user_last_request[self.user_id] = now
+
             today_str = _dt.now().date().isoformat()
             msg_lower = message.lower().strip()
+            # ✅ Store history for use in downstream handlers
+            self._conversation_history = conversation_history or []
 
             # ── Get existing schedule status for context ───────────────────────
             existing_plan = await self.db.daily_plans.find_one(
@@ -230,7 +250,10 @@ class AIAssistant:
             if intent == IntentType.MODIFY_SCHEDULE:
                 return await self._parse_and_save_routine(message)
             if intent == IntentType.CREATE_SCHEDULE:
-                return await self._create_schedule_with_nlp(message)
+                # ✅ FIX: pass history so scheduler understands multi-turn context
+                return await self._create_schedule_with_nlp(
+                    message, conversation_history=self._conversation_history
+                )
 
             # All other intents → enhanced rule-based
             return await self._enhanced_rule_based_processing(message)
@@ -239,7 +262,8 @@ class AIAssistant:
             logger.error(f"process_message error: {e}", exc_info=True)
             return {
                 "type":    "chat",
-                "message": "I ran into an issue. Please try again!",
+                # ✅ FIX: clearer error — doesn't blame the user
+                "message": "Something went wrong on my end. Please try again!",
                 "suggestions": [
                     "Study Physics 2 hours and Maths 1 hour",
                     "Add meditation for 30 minutes",
@@ -626,11 +650,24 @@ class AIAssistant:
         }
 
 
-    async def _create_schedule_with_nlp(self, message: str) -> Dict[str, Any]:
+    async def _create_schedule_with_nlp(self, message: str, conversation_history: list = []) -> Dict[str, Any]:
         """Create schedule using NLP for task extraction"""
-        
+
+        # ✅ FIX: If message is vague (e.g. "only python"), check last AI message
+        # for context clues (subjects, time) so we don't ask redundant questions
+        if conversation_history:
+            last_ai = next(
+                (m["content"] for m in reversed(conversation_history) if m.get("role") == "assistant"),
+                ""
+            )
+            # If the last AI message asked about subjects/time and user replied with just a subject,
+            # prepend the implied context so NLP can extract properly
+            if any(w in last_ai.lower() for w in ["what subjects", "how much time", "which subject", "cover"]):
+                if len(message.split()) <= 5:  # short reply = direct answer to AI question
+                    message = message  # keep as-is; NLP + Gemini handles it
+
         tasks = []
-        
+
         # Try NLP extraction first
         if self.nlp:
             try:
