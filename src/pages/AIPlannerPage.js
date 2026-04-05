@@ -284,15 +284,28 @@ export default function AIPlannerPage() {
   }, []);
 
   // ── Save user routine to backend ─────────────────────────────────────────
+  // Convert HH:MM (24h) to "H:MM AM/PM" so the AI backend always parses correctly
+  const to12h = (hhmm) => {
+    if (!hhmm) return "";
+    const [h, m] = hhmm.split(":").map(Number);
+    const period = h < 12 ? "AM" : "PM";
+    const hour   = h % 12 || 12;
+    return `${hour}:${String(m).padStart(2, "0")} ${period}`;
+  };
+
   const saveRoutine = async () => {
     setRoutineSaving(true);
     try {
       localStorage.setItem("user-routine", JSON.stringify(routine));
       const occupationLabels = { student: "student", professional: "working professional", freelancer: "freelancer", other: "other" };
-      const busyLabel = routine.hasBusy ? routine.busyLabel || "college" : "";
+      const busyLabel  = routine.hasBusy ? routine.busyLabel || "college" : "";
+      const wakeStr    = to12h(routine.wakeTime);
+      const sleepStr   = to12h(routine.sleepTime);
+      const busyStart  = to12h(routine.busyStart);
+      const busyEnd    = to12h(routine.busyEnd);
       const message = routine.hasBusy
-        ? `I wake up at ${routine.wakeTime}. I have ${busyLabel} from ${routine.busyStart} to ${routine.busyEnd}. I sleep at ${routine.sleepTime}. I am a ${occupationLabels[routine.occupation] || routine.occupation}.`
-        : `I wake up at ${routine.wakeTime}. I sleep at ${routine.sleepTime}. I am a ${occupationLabels[routine.occupation] || routine.occupation}. I am free all day.`;
+        ? `I wake up at ${wakeStr}. I have ${busyLabel} from ${busyStart} to ${busyEnd}. I sleep at ${sleepStr}. I am a ${occupationLabels[routine.occupation] || routine.occupation}.`
+        : `I wake up at ${wakeStr}. I sleep at ${sleepStr}. I am a ${occupationLabels[routine.occupation] || routine.occupation}. I am free all day.`;
       await fetch(`${API}/api/ai-assistant/chat`, {
         method: "POST",
         headers: authHeaders(),
