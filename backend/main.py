@@ -178,6 +178,7 @@ class TaskFeedback(BaseModel):
 class ChatMessage(BaseModel):
     message: str
     conversation_id: Optional[str] = None
+    conversation_history: Optional[List[dict]] = []  # ✅ FIX: carry full chat history
 
 class AdvancedPlanRequest(BaseModel):
     tasks: List[dict]
@@ -1072,7 +1073,11 @@ async def chat_with_ai(
     try:
         user_id   = str(current_user["_id"])
         assistant = AIAssistant(user_id, db)
-        response  = await assistant.process_message(request.message)
+        # ✅ FIX: pass full conversation history so AI has full context
+        response  = await assistant.process_message(
+            request.message,
+            conversation_history=request.conversation_history or []
+        )
 
         # ── Save / MERGE schedule to MongoDB ──────────────────────────────────
         if (
