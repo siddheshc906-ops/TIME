@@ -161,27 +161,54 @@ export default function AIPlannerPage() {
   const [routineSaving, setRoutineSaving] = useState(false);
 
   // ── fetch today's plan ───────────────────────────────────────────────────
-  const fetchPlan = useCallback(async () => {
+  // ✅ FIX: ref so callbacks can always call latest fetchPlan without circular deps
+  const fetchPlanRef = useRef(null);
+
+  const fetchPlan = useCallback(async (retryCount = 0) => {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${API}/api/daily-plans`, { headers: authHeaders() });
-      if (!res.ok) throw new Error("Failed to fetch plans");
-      const plans = await res.json();
-      const plan  = plans.find((p) => p.date === selectedDate);
+      // ✅ FIX: Use date-specific endpoint first (faster, more reliable)
+      const res = await fetch(
+        `${API}/api/daily-plans/${selectedDate}`,
+        { headers: authHeaders() }
+      );
 
-      if (plan?.schedule?.length) {
-        applySchedule(plan.schedule, plan.optimizedTasks || [], plan.insights || []);
+      // ✅ FIX: If specific endpoint fails, fall back to fetching all plans
+      if (!res.ok) {
+        const fallback = await fetch(`${API}/api/daily-plans`, { headers: authHeaders() });
+        if (!fallback.ok) throw new Error(`HTTP ${fallback.status}`);
+        const plans = await fallback.json();
+        const plan  = Array.isArray(plans) ? plans.find((p) => p.date === selectedDate) : null;
+        if (plan?.schedule?.length) {
+          applySchedule(plan.schedule, plan.optimizedTasks || [], plan.insights || []);
+        } else {
+          clearAll();
+        }
+        return;
+      }
+
+      const data = await res.json();
+      // /{plan_date} returns a single plan object or { schedule: [] } if not found
+      if (data?.schedule?.length) {
+        applySchedule(data.schedule, data.optimizedTasks || [], data.insights || []);
       } else {
         clearAll();
       }
     } catch (e) {
-      console.error(e);
+      console.error("fetchPlan error:", e);
+      // ✅ FIX: Auto-retry once silently before showing error
+      if (retryCount < 1) {
+        setTimeout(() => fetchPlan(retryCount + 1), 2000);
+        return;
+      }
+      // ✅ FIX: Don't block the whole page — just show a dismissible warning
       setError("Could not load your plan. Please refresh.");
     } finally {
       setLoading(false);
     }
   }, [selectedDate]);
+  fetchPlanRef.current = fetchPlan;
 
   // ── fetch productivity profile ────────────────────────────────────────────
   const fetchProfile = useCallback(async () => {
@@ -612,6 +639,13 @@ export default function AIPlannerPage() {
 
   useEffect(() => () => { setShowAssistant(false); }, []);
 
+  // ✅ FIX: Auto-dismiss error banner after 8 seconds
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(""), 8000);
+    return () => clearTimeout(t);
+  }, [error]);
+
   // ── helpers ────────────────────────────────────────────────────────────────
   function applySchedule(rawSchedule, rawTasks, backendInsights) {
     const items = rawSchedule.map(normaliseItem);
@@ -716,6 +750,8 @@ export default function AIPlannerPage() {
       computeLocalInsights(tasks || merged);
       setAiInsights(backendInsights || []);
       fetchPendingTasks();
+      // ✅ FIX: Re-fetch from DB after 1.5s to ensure main panel is in sync with AI chat
+      setTimeout(() => fetchPlanRef.current?.(), 1500);
       return merged;
     });
   }, [fetchPendingTasks, selectedDate]);
@@ -972,6 +1008,13 @@ export default function AIPlannerPage() {
               <div className="mb-6 px-4 py-3 bg-rose-50 border border-rose-200 rounded-xl
                               text-rose-700 text-sm flex items-center gap-2">
                 <span>⚠️</span> {error}
+                {/* ✅ FIX: Retry button so user doesn't have to manually refresh */}
+                <button
+                  onClick={() => { setError(""); fetchPlan(); }}
+                  className="ml-2 text-xs underline text-rose-600 hover:text-rose-800 font-medium"
+                >
+                  Retry
+                </button>
                 <button onClick={() => setError("")} className="ml-auto text-rose-400 hover:text-rose-600">
                   <X size={14} />
                 </button>
