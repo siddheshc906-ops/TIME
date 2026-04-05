@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import {
     Send, Bot, User, Sparkles, Calendar, TrendingUp, Lightbulb,
     X, Maximize2, Minimize2, Clock, Zap, Brain, Target, Award, BarChart,
+    ArrowLeft,
 } from "lucide-react";
 
 const API = process.env.REACT_APP_API_URL
@@ -286,13 +287,30 @@ export default function AIAssistant({
     }, [input, isLoading, onScheduleCreated, loadRecommendations]);
 
     // ── Quick actions ──────────────────────────────────────────────────────────
-    const PLANNER_ACTIONS = {
-        plan:     "Plan my day with optimal scheduling",
-        advice:   "Give me personalized productivity advice",
-        analyze:  "Analyze my productivity habits and patterns",
-        optimize: "Optimize my current schedule",
-        progress: "Show my productivity progress",
+    // Planner button nudge messages — friendly guidance, not auto-scheduling
+    const PLANNER_NUDGES = {
+        plan: {
+            message: "Just tell me what you want to get done today — tasks, errands, study, gym, work, anything.\n\nIf you also tell me your available time window, I'll schedule everything optimally.\n\nFor example:\n• Physics 2h, Maths 1h — free 4 PM to 10 PM\n• Gym at 6, dinner at 8, need to finish project work\n• Meetings till 3 PM, plan the rest of my day",
+            hint: "Type your tasks or just describe your day.",
+        },
+        advice: {
+            message: "What are you working on or struggling with?\n\nShare the context and I'll give you targeted, practical advice — not generic tips.\n\nFor example:\n• How do I prepare for an exam in one day?\n• I keep losing focus after 30 minutes\n• Best strategy for covering 3 subjects in 5 hours",
+            hint: "Describe your situation below.",
+        },
+        analyze: {
+            message: "Your habit analysis builds as you use the planner over several days.\n\nFor now, start scheduling — the more tasks you plan and complete, the more accurate and personalised your analysis becomes.\n\nTry: 'Physics 2h, Maths 1h — free 5 PM to 9 PM'",
+            hint: "Schedule tasks to start building your data.",
+        },
+        optimize: {
+            message: "To optimise your schedule, tell me your tasks and available window:\n\ne.g. 'Physics 2h, Maths 1.5h, Chemistry 1h — free 4 PM to 10 PM'\n\nI'll arrange them in the most productive order — hardest subjects during peak focus, lighter tasks later, with timed breaks built in.",
+            hint: "Type your tasks and time window below.",
+        },
+        progress: {
+            message: "Your progress data appears here as you complete scheduled tasks.\n\nStart by planning today — every completed task adds to your streak, completion rate, and focus score.\n\nTry: 'Physics 2h, Maths 1h — free from 5 PM to 9 PM'",
+            hint: "Schedule tasks to start tracking.",
+        },
     };
+
     const COACH_ACTIONS = {
         productive: "How productive am I based on my data?",
         improve:    "What should I improve to be more productive?",
@@ -300,16 +318,32 @@ export default function AIAssistant({
         gaps:       "What's my biggest productivity gap right now?",
         streak:     "How do I build a consistent daily streak?",
     };
+
     const handleQuickAction = useCallback((action) => {
-        const map = mode === "coach" ? COACH_ACTIONS : PLANNER_ACTIONS;
-        const text = map[action] || action;
-        sendMessage(text);
-    }, [mode, sendMessage]);
+        if (mode === "coach") {
+            const text = COACH_ACTIONS[action] || action;
+            sendMessage(text);
+        } else {
+            // Planner mode: show a friendly nudge message and focus the input
+            const nudge = PLANNER_NUDGES[action];
+            if (nudge) {
+                setMessages(prev => [...prev, {
+                    id:        Date.now(),
+                    role:      "assistant",
+                    content:   nudge.message,
+                    type:      "chat",
+                    data:      { suggestions: [] },
+                    timestamp: new Date().toISOString(),
+                }]);
+                setTimeout(() => inputRef.current?.focus(), 100);
+            }
+        }
+    }, [mode, sendMessage, setMessages]);
 
     const handleSuggestionClick = useCallback((suggestion) => {
-        setInput(suggestion);
-        inputRef.current?.focus();
-    }, []);
+        // Auto-send suggestion instead of just filling the input
+        sendMessage(suggestion);
+    }, [sendMessage]);
 
     const handleSendClick = useCallback(() => {
         sendMessage();
@@ -550,7 +584,53 @@ export default function AIAssistant({
             );
         }
 
-        return <p className="text-sm whitespace-pre-wrap">{msg.content}</p>;
+        // Deduplicate repeated bullet lines (e.g. routine detection listing same entry multiple times)
+        const deduplicatedContent = (() => {
+            const lines = msg.content.split("\n");
+            const seen = new Set();
+            return lines.filter(line => {
+                const trimmed = line.trim();
+                if (!trimmed) return true; // keep blank lines for spacing
+                if (seen.has(trimmed)) return false;
+                seen.add(trimmed);
+                return true;
+            }).join("\n");
+        })();
+
+        // Planner mode: render chat message with suggestion chips (no per-chip hints)
+        if (mode !== "coach" && data?.suggestions && data.suggestions.length > 0 && msg.role === "assistant") {
+            // Only show a single faded example below the message itself for scheduling prompts
+            const isSchedulingPrompt = msg.content.toLowerCase().includes("tell me what tasks") ||
+                                       msg.content.toLowerCase().includes("what do you want to") ||
+                                       msg.content.toLowerCase().includes("what tasks") ||
+                                       msg.content.toLowerCase().includes("all set");
+            return (
+                <div>
+                    <p className="text-sm whitespace-pre-wrap">{deduplicatedContent}</p>
+                    {isSchedulingPrompt && (
+                        <p className="mt-1.5 text-[10px] text-gray-300 italic">
+                            e.g. Physics 2h, Maths 1h — free 5 PM to 10 PM
+                        </p>
+                    )}
+                    <div className="mt-3 space-y-1.5">
+                        {data.suggestions.map((s, i) => (
+                            <button
+                                key={i}
+                                onClick={() => { setInput(s); setTimeout(() => sendMessage(s), 80); }}
+                                className="w-full text-left text-xs px-3 py-2 rounded-lg
+                                           bg-white border border-violet-200 text-violet-700
+                                           hover:bg-violet-50 hover:border-violet-400
+                                           transition-all font-medium"
+                            >
+                                {s}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        return <p className="text-sm whitespace-pre-wrap">{deduplicatedContent}</p>;
     };
 
     if (!isOpen) return null;
@@ -587,6 +667,14 @@ export default function AIAssistant({
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
+                            {messages.length > 0 && (
+                                <button
+                                    onClick={() => setMessages([])}
+                                    className="p-2 hover:bg-white/20 rounded-lg transition"
+                                    title="Back to home">
+                                    <ArrowLeft size={18} className="text-white" />
+                                </button>
+                            )}
                             {productivityProfile && (
                                 <button onClick={() => setShowProductivityProfile(v => !v)}
                                         className="p-2 hover:bg-white/20 rounded-lg transition relative"
@@ -669,41 +757,50 @@ export default function AIAssistant({
                                                 </div>
                                             </div>
                                         ) : (
-                                            /* ── Planner mode empty state (original) ── */
-                                            <div className="w-full space-y-4">
-                                                <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mb-4 mx-auto">
-                                                    <Bot size={40} className="text-purple-600" />
+                                            /* ── Planner mode empty state ── */
+                                            <div className="w-full space-y-3">
+                                                <div className="flex items-center gap-3 mb-1">
+                                                    <div className="w-9 h-9 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                                                        <Bot size={18} className="text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-sm font-semibold text-gray-800">AI Productivity Planner</h4>
+                                                        <p className="text-[11px] text-gray-400">Powered by Timevora AI</p>
+                                                    </div>
                                                 </div>
-                                                <h4 className="text-lg font-semibold text-gray-800 mb-2">Hello! I'm your AI Coach</h4>
-                                                <p className="text-gray-700 mb-6">
-                                                    I can help you plan your day, optimize your schedule, analyze habits, and give personalized advice.
+
+                                                <p className="text-xs text-gray-500 leading-relaxed">
+                                                    Just tell me what's on your mind — studying, work, gym, errands, anything. I'll understand the context and build a smart plan around your day.
                                                 </p>
-                                                <div className="grid grid-cols-2 gap-2">
+
+                                                <div className="space-y-1.5">
+                                                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Try saying</p>
                                                     {[
-                                                        { action: "plan",     icon: <Calendar size={16} className="text-purple-600" />,  label: "Plan Day", cls: "bg-purple-50 border-purple-200 hover:bg-purple-100 text-purple-700" },
-                                                        { action: "advice",   icon: <Lightbulb size={16} className="text-blue-600" />,    label: "Advice",   cls: "bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700" },
-                                                        { action: "analyze",  icon: <TrendingUp size={16} className="text-green-600" />,  label: "Analyze",  cls: "bg-green-50 border-green-200 hover:bg-green-100 text-green-700" },
-                                                        { action: "optimize", icon: <Zap size={16} className="text-orange-600" />,        label: "Optimize", cls: "bg-orange-50 border-orange-200 hover:bg-orange-100 text-orange-700" },
+                                                        "I have an exam tomorrow, help me prepare",
+                                                        "Plan my evening — gym, dinner, some work",
+                                                        "I have college till 4 PM, what should I do after?",
+                                                        "I'm free today, make me productive",
+                                                    ].map((s, i) => (
+                                                        <button key={i} onClick={() => handleSuggestionClick(s)}
+                                                                className="w-full text-left px-3 py-2 bg-white border border-gray-200 rounded-xl hover:border-violet-300 hover:bg-violet-50 transition text-xs text-gray-700 font-medium leading-snug">
+                                                            {s}
+                                                        </button>
+                                                    ))}
+                                                </div>
+
+                                                <div className="grid grid-cols-2 gap-2 pt-1">
+                                                    {[
+                                                        { action: "plan",     icon: <Calendar size={13} className="text-violet-600" />,  label: "Plan my day",    cls: "bg-violet-50 border-violet-200 hover:bg-violet-100 text-violet-700" },
+                                                        { action: "advice",   icon: <Lightbulb size={13} className="text-blue-600" />,    label: "Get advice",     cls: "bg-blue-50 border-blue-200 hover:bg-blue-100 text-blue-700" },
+                                                        { action: "analyze",  icon: <TrendingUp size={13} className="text-green-600" />,  label: "My progress",    cls: "bg-green-50 border-green-200 hover:bg-green-100 text-green-700" },
+                                                        { action: "optimize", icon: <Zap size={13} className="text-orange-600" />,        label: "Optimize",       cls: "bg-orange-50 border-orange-200 hover:bg-orange-100 text-orange-700" },
                                                     ].map(({ action, icon, label, cls }) => (
                                                         <button key={action} onClick={() => handleQuickAction(action)}
-                                                                className={`flex items-center justify-center gap-2 p-3 border rounded-xl transition font-medium text-sm ${cls}`}>
+                                                                className={`flex items-center gap-2 p-2.5 border rounded-xl transition font-medium text-xs ${cls}`}>
                                                             {icon} {label}
                                                         </button>
                                                     ))}
                                                 </div>
-                                                {suggestions.length > 0 && (
-                                                    <div className="mt-4">
-                                                        <p className="text-sm text-gray-600 mb-3 text-left">Try asking:</p>
-                                                        <div className="space-y-2">
-                                                            {suggestions.slice(0, 3).map((s, i) => (
-                                                                <button key={i} onClick={() => handleSuggestionClick(s)}
-                                                                        className="w-full text-left p-3 bg-white border border-gray-200 rounded-xl hover:border-purple-300 hover:bg-purple-50 transition text-sm text-gray-800 font-medium">
-                                                                    {s}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -774,7 +871,7 @@ export default function AIAssistant({
                                         value={input}
                                         onChange={(e) => setInput(e.target.value)}
                                         onKeyPress={handleKeyPress}
-                                        placeholder="Ask me anything..."
+                                        placeholder={mode === "coach" ? "Ask about your productivity..." : "Tell me what's on your plate today..."}
                                         className="flex-1 border rounded-xl p-3 max-h-32 min-h-[44px] resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                         rows="1"
                                         disabled={isLoading}
