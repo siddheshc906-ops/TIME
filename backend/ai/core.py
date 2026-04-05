@@ -965,7 +965,7 @@ JSON FORMAT REFERENCE:
                 "I'm your AI Planner — I specialise in scheduling tasks and "
                 "organising your day! 📅\n\n"
                 "For coaching questions, productivity tips, and performance "
-                "analysis, head to the **Performance** page where the AI Study "
+                "analysis, head to the Performance page where the AI Study "
                 "Coach is waiting for you. 💡\n\n"
                 f"{random.choice(tips)}"
             ),
