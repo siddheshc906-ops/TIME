@@ -144,29 +144,48 @@ class AIAssistant:
             logger.info("NLP Processor loaded successfully")
         except ImportError as e:
             logger.warning(f"NLP processor not available: {e}")
-        
+
+        # Initialize SmartBrain pre-processor
+        try:
+            from ai.smart_brain import SmartBrain
+            self.brain = SmartBrain()
+            logger.info("SmartBrain loaded successfully")
+        except ImportError as e:
+            logger.warning(f"SmartBrain not available: {e}")
+            self.brain = None
+
         # Initialize OpenAI client
         openai.api_key = os.getenv("OPENAI_API_KEY")
     
     async def process_message(self, message: str) -> Dict[str, Any]:
         """
-        Main entry point.
-        Intent detection is now smart enough to handle natural messages like:
-          "meditation for 30 minutes"  → ADD_TASK
-          "physics 2hr and maths 1hr"  → CREATE_SCHEDULE
-          "plan my day"                → CREATE_SCHEDULE
-          "i have college 9 to 4"      → MODIFY_SCHEDULE (save routine)
+        Main entry point with SmartBrain pre-processing.
+
+        The SmartBrain prevents:
+        - Greetings ("Hi") being scheduled as tasks
+        - Casual chat triggering the scheduler
+        - Ambiguous single words being blindly scheduled
+        - Context messages ("I have holiday") being mishandled
         """
         try:
             from datetime import datetime as _dt
             today_str = _dt.now().date().isoformat()
 
-            intent = await self._detect_intent(message)
-            logger.info(f"Detected intent: {intent} for message: '{message[:60]}'")
+            # ── Get existing schedule status for context ───────────────────────
+            existing_plan = await self.db.daily_plans.find_one(
+                {"user_id": self.user_id, "date": today_str}
+            )
+            has_schedule = bool((existing_plan or {}).get("schedule"))
 
-            # ── Check for daily check-in reply first ──────────────────────────
-            # If there are pending tasks saved from a previous check-in, and
-            # the user is now describing their day, schedule those tasks.
+            # ── SmartBrain pre-processing ──────────────────────────────────────
+            if self.brain:
+                brain_result = await self.brain.pre_process(message, has_schedule)
+                if brain_result["action"] == "respond":
+                    # SmartBrain handled it — no scheduling needed
+                    return brain_result["response"]
+                # SmartBrain says "proceed" — message is a real task/schedule intent
+
+            # ── Check for daily check-in reply ────────────────────────────────
             pending_doc = None
             try:
                 pending_doc = await self.db.user_pending_context.find_one(
@@ -186,6 +205,9 @@ class AIAssistant:
                     return await self._get_pending_tasks_and_schedule(message)
 
             # ── Route by intent ───────────────────────────────────────────────
+            intent = await self._detect_intent(message)
+            logger.info(f"Detected intent: {intent} for message: '{message[:60]}'")
+
             if intent == IntentType.ADD_TASK:
                 return await self._handle_add_task(message)
 
@@ -231,11 +253,19 @@ class AIAssistant:
                     logger.info(f"NLP extracted {len(tasks)} tasks: {[t['name'] for t in tasks]}")
             except Exception as e:
                 logger.error(f"NLP extraction error: {e}")
-        
-        # Fallback to manual extraction if NLP fails
+
+        # Validate extracted tasks through SmartBrain
+        if self.brain and tasks:
+            tasks = self.brain.validate_extracted_tasks(tasks, message)
+            logger.info(f"After SmartBrain validation: {len(tasks)} tasks remain")
+
+        # Fallback to manual extraction if NLP fails or returns nothing
         if not tasks:
             tasks = await self._manual_extract_tasks(message)
             logger.info(f"Manual extraction found {len(tasks)} tasks")
+            # Validate manual extraction too
+            if self.brain and tasks:
+                tasks = self.brain.validate_extracted_tasks(tasks, message)
         
         if not tasks:
             return {
@@ -1322,8 +1352,15 @@ Respond with:
             except Exception as e:
                 logger.error(f"NLP extraction in add_task: {e}")
 
+        # Validate extracted tasks through SmartBrain
+        if self.brain and tasks:
+            tasks = self.brain.validate_extracted_tasks(tasks, message)
+
         if not tasks:
             tasks = await self._manual_extract_tasks(message)
+            # Validate manual extraction too
+            if self.brain and tasks:
+                tasks = self.brain.validate_extracted_tasks(tasks, message)
 
         if not tasks:
             return {
@@ -1687,14 +1724,25 @@ Respond with:
     
     async def _detect_intent(self, message: str) -> IntentType:
         """
-        Smart intent detection.
-        Key insight: ANY message that mentions a task + duration is a scheduling
-        request — even without "add" or "plan" keywords.
-        e.g. "meditation for 30 minutes" → ADD_TASK (has existing schedule)
-             "physics 2 hours maths 1 hour" → CREATE_SCHEDULE
+        Smart intent detection — updated to NOT treat every message as a task.
+        Short messages, greetings, and single words are now guarded.
+        SmartBrain handles greetings/chat before this method is even called,
+        so here we focus on routing real task/schedule intents correctly.
         """
         import re as _re
         msg = message.lower().strip()
+        words = msg.split()
+
+        # ── Guard: short messages that shouldn't be tasks ─────────────────────
+        # If message is 1-2 words and not a known task keyword → general chat
+        if len(words) <= 2:
+            _known_task_words = {
+                "gym", "yoga", "study", "exercise", "walk", "run", "meditate",
+                "code", "read", "write", "work", "practice", "revision", "workout",
+                "sleep", "nap", "cook", "clean", "laundry", "shopping",
+            }
+            if not words or words[0] not in _known_task_words:
+                return IntentType.GENERAL_CHAT
 
         # ── 1. ROUTINE: user describing their daily structure ─────────────────
         _routine_phrases = [
@@ -1721,8 +1769,8 @@ Respond with:
             return IntentType.OPTIMIZE_SCHEDULE
 
         # ── 4. ADVICE ─────────────────────────────────────────────────────────
-        if any(p in msg for p in ['advice', 'tips', 'recommend', 'suggest', 'help me focus',
-                                   'how to', 'what should']):
+        if any(p in msg for p in ['advice', 'tips', 'recommend', 'suggest',
+                                   'help me focus', 'how to', 'what should']):
             return IntentType.GET_ADVICE
 
         # ── 5. QUESTION ───────────────────────────────────────────────────────
@@ -1749,48 +1797,44 @@ Respond with:
             return IntentType.ADD_TASK
 
         # ── 8. SMART TASK DETECTION ───────────────────────────────────────────
-        # If the message looks like it contains a task description
-        # (something + duration OR something + time), treat it as scheduling.
-        # This catches: "meditation for 30 minutes", "walk 45 min", "physics 2hr"
         _has_duration = bool(_re.search(
-            r'\d+(\.\d+)?\s*(hour|hr|h|minute|min|mins?)', msg
+            r'\d+(\.\d+)?\s*(hour|hr|h\b|minute|min|mins?)', msg
         ))
         _has_time_of_day = bool(_re.search(
-            r'\d{1,2}:\d{2}\s*(am|pm)|\d{1,2}\s*(am|pm)', msg
+            r'\d{1,2}:\d{2}\s*(am|pm)|\d{1,2}\s*(am|pm)', msg
         ))
         _has_activity = bool(_re.search(
-            r'(study|read|exercise|walk|run|gym|meditat|yoga|code|coding|'
+            r'(study|read|exercise|walk|run|gym|meditat|yoga|code|coding|'
             r'work|practice|revision|revise|homework|assignment|project|'
             r'physics|maths?|chemistry|biology|english|history|geography|'
             r'dsa|leetcode|language|music|draw|write|meet|call|'
-            r'cook|eat|sleep|nap|break|rest)', msg
+            r'cook|eat|sleep|nap|break|rest)', msg
         ))
 
         # Task + duration → definitely scheduling
         if _has_duration and _has_activity:
-            # Check if message mentions MULTIPLE tasks → full plan
-            # Simple heuristic: commas or "and" between task words = multiple tasks
             task_count = len(_re.findall(
-                r'(study|read|exercise|walk|run|gym|meditat|yoga|code|work|'
-                r'practice|revision|physics|maths?|chemistry|biology|dsa)', msg
+                r'(study|read|exercise|walk|run|gym|meditat|yoga|code|work|'
+                r'practice|revision|physics|maths?|chemistry|biology|dsa)', msg
             ))
             if task_count >= 2:
                 return IntentType.CREATE_SCHEDULE
-            return IntentType.ADD_TASK   # single task → add to existing
+            return IntentType.ADD_TASK
 
         # Has time of day + activity → schedule it
         if _has_time_of_day and _has_activity:
             return IntentType.CREATE_SCHEDULE
 
-        # Just a duration mentioned (e.g. "30 minutes of meditation") → add task
-        if _has_duration:
+        # Duration only → add task (but message must be > 2 words)
+        if _has_duration and len(words) > 2:
             return IntentType.ADD_TASK
 
-        # Just an activity name (e.g. "meditation", "a walk") → add task
-        if _has_activity:
+        # Activity name only → add task only if message is meaningful (> 2 words)
+        # Single-word activity names are handled by SmartBrain's clarification gate
+        if _has_activity and len(words) > 2:
             return IntentType.ADD_TASK
 
-        # Explicit "i need to / i have to" → create schedule
+        # Explicit intent phrases
         if any(p in msg for p in ["i need to", "i have to", "plan", "schedule",
                                    "tasks for", "to do", "my day"]):
             return IntentType.CREATE_SCHEDULE
