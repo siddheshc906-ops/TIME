@@ -324,12 +324,30 @@ class ContextExtractor:
             return {
                 "type": "free_day",
                 "date": date_word,
-                "message": f"Got it! I'll note that {date_word} is a free day. "
-                           f"Want me to help you plan some personal time or learning goals?",
+                "message": (
+                    f"Got it — {date_word} is a free day. "
+                    f"Want to use some of that time productively, or keep it as proper rest?"
+                ),
                 "suggestions": [
-                    "Plan some light activities for tomorrow",
-                    "Study something I enjoy",
-                    "Schedule rest and relaxation",
+                    f"Plan something light for {date_word}",
+                    "Schedule rest and recovery",
+                    f"Use {date_word} to catch up on something",
+                ]
+            }
+
+        # Cancelled class / unexpected free time
+        cancelled_match = re.search(
+            r"(class|lecture|college|school|work|meeting)\s+(is\s+)?(cancelled?|canceled?|off|not\s+happening)",
+            msg
+        )
+        if cancelled_match:
+            return {
+                "type": "free_time",
+                "message": "Unexpected free time — the best kind. What do you want to do with it?",
+                "suggestions": [
+                    "Catch up on pending work",
+                    "Do something I've been putting off",
+                    "Rest and recharge",
                 ]
             }
 
@@ -360,27 +378,38 @@ class ConfirmationGate:
 
         # Single known task keyword (e.g. "gym", "yoga", "read")
         if len(words) == 1 and words[0] in _REAL_TASK_KEYWORDS:
+            task_name = message.strip()
             return {
                 "type": "clarification",
-                "message": f"Sure! How long would you like to schedule **{message.strip()}** for?",
+                "message": f"How long do you want to schedule {task_name} for, and when are you free?",
                 "suggestions": [
-                    f"{message.strip()} for 30 minutes",
-                    f"{message.strip()} for 1 hour",
-                    f"{message.strip()} for 2 hours",
+                    f"{task_name} 30 minutes",
+                    f"{task_name} 1 hour",
+                    f"{task_name} 1 hour from 6 PM",
                 ]
             }
 
-        # Task keyword present but no time/duration
+        # Task keyword present but no time/duration — ask specifically about what they mentioned
         if category == MessageCategory.AMBIGUOUS:
+            # Try to extract what they mentioned to ask a relevant follow-up
+            mentioned = [kw for kw in _REAL_TASK_KEYWORDS if kw in msg_lower]
+            if mentioned:
+                subject = mentioned[0].capitalize()
+                return {
+                    "type": "clarification",
+                    "message": f"Want me to schedule {subject}? If so, how long and when are you free?",
+                    "suggestions": [
+                        f"{subject} for 1 hour",
+                        f"{subject} 2 hours this evening",
+                        "Just giving you information",
+                    ]
+                }
             return {
                 "type": "clarification",
-                "message": f"I'd love to help! Do you want me to **schedule** something, or are you just sharing info?\n\n"
-                           f"For example:\n"
-                           f"• 'Study physics for 2 hours'\n"
-                           f"• 'I have a holiday tomorrow' (I'll note it but not schedule)",
+                "message": "Do you want me to schedule something, or are you sharing some context about your day?",
                 "suggestions": [
-                    "Schedule something for me",
-                    "Just giving you information",
+                    "Yes, schedule it for me",
+                    "Just sharing info",
                     "Give me productivity tips",
                 ]
             }
@@ -440,10 +469,10 @@ class SmartBrain:
                 "action": "respond",
                 "response": {
                     "type": "chat",
-                    "message": "Happy to help! 🚀 What else would you like to plan or ask?",
+                    "message": "Happy to help. What else do you need?",
                     "suggestions": [
-                        "Add a task to my schedule",
-                        "Give me productivity tips",
+                        "Add something to my plan",
+                        "Give me productivity advice",
                         "Show my progress",
                     ],
                 },
@@ -473,7 +502,14 @@ class SmartBrain:
         if clarification:
             return {"action": "respond", "response": clarification}
 
-        # ── 4. Proceed with normal flow ───────────────────────────────────────
+        # ── 4. Time window check — if scheduling intent is clear but no time
+        #       range given, ask for it so we don't silently use defaults ────────
+        if category in (MessageCategory.TASK_SCHEDULING, MessageCategory.TASK_ADD):
+            time_window_response = self._check_time_window(msg, category)
+            if time_window_response:
+                return {"action": "respond", "response": time_window_response}
+
+        # ── 5. Proceed with normal flow ───────────────────────────────────────
         return {
             "action":   "proceed",
             "category": category,
@@ -491,26 +527,105 @@ class SmartBrain:
         """
         return self.validator.validate_tasks(tasks, original_message)
 
+    def _check_time_window(self, msg: str, category: MessageCategory) -> Optional[Dict[str, Any]]:
+        """
+        If the user has clearly stated tasks but given NO time window,
+        ask for their available window before scheduling — so we never
+        silently use defaults and place tasks at wrong times.
+        Skip this if:
+          - a time range is already present (from X PM to Y PM / free from X)
+          - a specific fixed time is mentioned (at 6 PM)
+          - user is just adding to an existing schedule (TASK_ADD with time)
+        """
+        msg_lower = msg.lower()
+
+        # Already has a time range → proceed normally
+        has_time_range = bool(re.search(
+            r"(from\s+\d{1,2}(:\d{2})?\s*(am|pm)\s*(to|-)\s*\d{1,2}|"
+            r"free\s+(from|after|till|until)|"
+            r"available\s+(from|after|till)|"
+            r"\d{1,2}(:\d{2})?\s*(am|pm)\s*(to|-)\s*\d{1,2}(:\d{2})?\s*(am|pm)|"
+            r"(till|until|before)\s+\d{1,2}(:\d{2})?\s*(am|pm))",
+            msg_lower
+        ))
+        if has_time_range:
+            return None
+
+        # Already has a fixed "at X PM" time → let it proceed
+        has_fixed_time = bool(re.search(
+            r"\bat\s+\d{1,2}(:\d{2})?\s*(am|pm)", msg_lower
+        ))
+        if has_fixed_time:
+            return None
+
+        # "plan my day" / "plan my evening" without a time → ask
+        plan_phrases = ["plan my day", "plan my evening", "plan my morning",
+                        "plan my afternoon", "plan my night", "plan my week"]
+        if any(p in msg_lower for p in plan_phrases):
+            period = next((p.split("my ")[1] for p in plan_phrases if p in msg_lower), "day")
+            # Extract tasks mentioned so the follow-up is relevant
+            mentioned = [kw for kw in _REAL_TASK_KEYWORDS if kw in msg_lower]
+            task_str = ", ".join(mentioned[:3]) if mentioned else "your tasks"
+            return {
+                "type": "checkin",
+                "message": (
+                    f"I can plan your {period} around {task_str}.\n\n"
+                    f"📅 What is your available time window?\n\n"
+                    f"e.g. 'Free from 5 PM to 10 PM' or '6 PM till midnight'"
+                ),
+                "suggestions": [
+                    "Free from 5 PM to 10 PM",
+                    "6 PM to 11 PM",
+                    "Free all evening",
+                ],
+                "pending_tasks": mentioned,
+            }
+
+        # Has tasks but no time info at all → ask for window
+        has_tasks = any(kw in msg_lower for kw in _REAL_TASK_KEYWORDS)
+        has_duration = bool(re.search(r"\d+\s*(hour|hr|h\b|minute|min)", msg_lower))
+
+        # If tasks are named but no duration AND no time → ask for window
+        if has_tasks and not has_duration and category == MessageCategory.TASK_SCHEDULING:
+            mentioned = [kw for kw in _REAL_TASK_KEYWORDS if kw in msg_lower]
+            task_str = ", ".join(m.capitalize() for m in mentioned[:3]) if mentioned else "these tasks"
+            return {
+                "type": "checkin",
+                "message": (
+                    f"Got it — {task_str}.\n\n"
+                    f"📅 What's your available time window today? Give me a start and end time and I'll schedule everything.\n\n"
+                    f"e.g. '4 PM to 9 PM' or 'Free from 6 PM till 11 PM'"
+                ),
+                "suggestions": [
+                    "4 PM to 9 PM",
+                    "Free from 6 PM to 11 PM",
+                    "Free all evening",
+                ],
+                "pending_tasks": mentioned,
+            }
+
+        return None
+
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _greeting_response(self, has_schedule: bool) -> Dict[str, Any]:
         if has_schedule:
             return {
                 "type": "chat",
-                "message": "Hey! 👋 You already have tasks scheduled today. Want to add more, or need tips?",
+                "message": "Hey! You already have things scheduled today. Want to add more, adjust the plan, or need advice on something?",
                 "suggestions": [
-                    "Add a task to my schedule",
+                    "Add something to my schedule",
+                    "Optimize what I have",
                     "Give me productivity tips",
-                    "Show my progress",
                 ],
             }
         return {
             "type": "chat",
-            "message": "Hey! 👋 What would you like to work on today? Tell me your tasks and I'll schedule them!",
+            "message": "Hey! What's on your plate today? Just tell me — studying, work, gym, errands, anything — and I'll build a plan around your available time.",
             "suggestions": [
-                "Study Physics 2 hours and Maths 1 hour",
-                "Add gym for 1 hour",
                 "Plan my day",
+                "I have an exam tomorrow",
+                "I'm free this evening, make me productive",
             ],
         }
 
@@ -519,22 +634,34 @@ class SmartBrain:
         if any(p in msg_lower for p in ["how are you", "how r u"]):
             return {
                 "type": "chat",
-                "message": "I'm doing great and ready to help you be productive! 💪 What tasks shall we tackle today?",
-                "suggestions": ["Plan my study session", "Add a task", "Give me tips"],
+                "message": "Doing well! What are you working on today? Tell me and I'll help you plan it.",
+                "suggestions": ["Plan my day", "Help me prioritise tasks", "Give me productivity tips"],
             }
         if any(p in msg_lower for p in ["who are you", "what are you"]):
             return {
                 "type": "chat",
-                "message": "I'm your AI Productivity Coach, powered by Timevora! 🧠 I help you schedule tasks, track progress, and stay focused. What can I help you plan?",
-                "suggestions": ["Schedule tasks for today", "Give me productivity tips"],
+                "message": "I'm your AI Productivity Planner, powered by Timevora. I understand what you need to do, ask the right questions, and build you a smart schedule — whether it's studying, work, gym, or anything else. What do you want to plan?",
+                "suggestions": ["Plan my day", "Schedule tasks for today", "Give me productivity tips"],
             }
-        # Generic fallback
+        if any(p in msg_lower for p in ["i'm bored", "im bored", "nothing to do"]):
+            return {
+                "type": "chat",
+                "message": "Boredom is an opportunity. What's something you've been putting off — a skill to learn, a task to finish, or a habit to build? Tell me and I'll put it on the calendar.",
+                "suggestions": ["Plan something productive", "Give me ideas", "What should I do today?"],
+            }
+        if any(p in msg_lower for p in ["i'm tired", "im tired", "i'm sleepy", "im sleepy"]):
+            return {
+                "type": "chat",
+                "message": "Noted. Want me to build a lighter plan for today with built-in rest, or would you rather focus on just one key task?",
+                "suggestions": ["Light schedule for today", "Just one important task", "Schedule a nap first"],
+            }
+        # Generic fallback — don't default to study
         return {
             "type": "chat",
-            "message": "I'm here to help you stay productive! 🎯 Tell me what you need to do and I'll build you a schedule.",
+            "message": "I'm here to help you plan your day and stay on track. What do you want to tackle?",
             "suggestions": [
-                "Study Physics 2 hours",
                 "Plan my day",
-                "Give me focus tips",
+                "Help me prioritise",
+                "Give me productivity tips",
             ],
         }
