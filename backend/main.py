@@ -59,6 +59,11 @@ try:
         tls=True,
         tlsCAFile=certifi.where(),
         serverSelectionTimeoutMS=5000,
+        # ✅ FIX: increase pool for concurrent users
+        maxPoolSize=50,
+        minPoolSize=5,
+        connectTimeoutMS=10000,
+        socketTimeoutMS=30000,
     )
     db = client[os.environ.get("DB_NAME", "timevora")]
 
@@ -1067,16 +1072,22 @@ async def get_today_context(current_user=Depends(get_current_user)):
 # ╚══════════════════════════════════════════════════════════════════════════════
 
 @api_router.post("/ai-assistant/chat")
+@limiter.limit("30/minute")  # ✅ FIX: prevent API abuse and Gemini cost spikes
 async def chat_with_ai(
-    request: ChatMessage, current_user=Depends(get_current_user)
+    request: Request,
+    chat_request: ChatMessage = None,
+    current_user=Depends(get_current_user)
 ):
+    if chat_request is None:
+        chat_request = await request.json()
+        chat_request = ChatMessage(**chat_request)
     try:
         user_id   = str(current_user["_id"])
         assistant = AIAssistant(user_id, db)
         # ✅ FIX: pass full conversation history so AI has full context
         response  = await assistant.process_message(
-            request.message,
-            conversation_history=request.conversation_history or []
+            chat_request.message,
+            conversation_history=chat_request.conversation_history or [],
         )
 
         # ── Save / MERGE schedule to MongoDB ──────────────────────────────────
@@ -1098,7 +1109,7 @@ async def chat_with_ai(
                 # Decide: add-task (merge) vs full re-plan (replace)
                 # Priority 1: AI explicitly flagged add_intent
                 # Priority 2: keyword heuristic on user message
-                msg_lower = request.message.lower()
+                msg_lower = chat_request.message.lower()
                 is_add_intent = bool(response.get("add_intent"))  # set by _handle_add_task
                 if not is_add_intent and existing_schedule:
                     _add_kws  = ["add ", "also add", "also schedule", "include ",
