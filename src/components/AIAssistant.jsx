@@ -34,10 +34,14 @@ export default function AIAssistant({
     const [recommendations,         setRecommendations]         = useState([]);
     const [performanceSnapshot,     setPerformanceSnapshot]     = useState(null); // coach mode data
 
-    const messagesEndRef = useRef(null);
-    const inputRef       = useRef(null);
-    const assistantRef   = useRef(null);
+    const messagesEndRef    = useRef(null);
+    const inputRef          = useRef(null);
+    const assistantRef      = useRef(null);
     const loadingTimeoutRef = useRef(null);
+    // ✅ FIX: ref to always get latest isLoading state inside timeouts/closures
+    const isLoadingRef      = useRef(false);
+    // ✅ FIX: ref to always get latest messages for conversation history
+    const messagesRef       = useRef([]);
 
     // ── Cleanup on unmount ─────────────────────────────────────────────────────
     useEffect(() => {
@@ -70,6 +74,10 @@ export default function AIAssistant({
             parentSetMessagesRef.current(messages);
         }
     }, [messages]);
+
+    // ✅ FIX: Keep refs in sync with state
+    useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+    useEffect(() => { messagesRef.current = messages; }, [messages]);
 
     // ── Scroll to bottom ───────────────────────────────────────────────────────
     useEffect(() => {
@@ -172,46 +180,52 @@ export default function AIAssistant({
     }, []);
 
     // ── Send message ───────────────────────────────────────────────────────────
-    const sendMessage = useCallback(async (overrideText) => {
+    const sendMessage = useCallback(async (overrideText, retryCount = 0) => {
         const messageText = (overrideText ?? input).trim();
-        if (!messageText || isLoading) return;
+        if (!messageText || isLoadingRef.current) return; // ✅ FIX: use ref not stale state
 
-        setMessages(prev => [...prev, {
+        const userMsg = {
             id:        Date.now(),
             role:      "user",
             content:   messageText,
             timestamp: new Date().toISOString(),
-        }]);
+        };
+        setMessages(prev => [...prev, userMsg]);
         setInput("");
         setIsLoading(true);
-        
+
         // Clear any existing timeout
-        if (loadingTimeoutRef.current) {
-            clearTimeout(loadingTimeoutRef.current);
-        }
-        
-        // Safety timeout to clear loading state after 30 seconds
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+
+        // ✅ FIX: Safety timeout uses ref so it always reads current value
         loadingTimeoutRef.current = setTimeout(() => {
-            if (isLoading) {
+            if (isLoadingRef.current) {
                 console.warn("Loading timeout - forcing stop");
                 setIsLoading(false);
             }
         }, 30000);
 
         try {
-            // Route to the correct endpoint based on mode
             const endpoint = mode === "coach"
                 ? `${API}/api/ai/guidance`
                 : `${API}/api/ai-assistant/chat`;
-            const res  = await fetch(endpoint, {
+
+            // ✅ FIX: Send full conversation history so AI has context
+            const history = messagesRef.current
+                .filter(m => m.role === "user" || m.role === "assistant")
+                .slice(-10) // last 10 messages max
+                .map(m => ({ role: m.role, content: m.content }));
+
+            const res = await fetch(endpoint, {
                 method:  "POST",
                 headers: authHeaders(),
-                body:    JSON.stringify({ message: messageText }),
+                body:    JSON.stringify({
+                    message:              messageText,
+                    conversation_history: history,
+                }),
             });
 
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
             const data = await res.json();
 
@@ -226,12 +240,10 @@ export default function AIAssistant({
 
             setMessages(prev => [...prev, aiMessage]);
 
-            // Coach mode: update snapshot when we get fresh data_summary back
             if (mode === "coach" && data.data_summary && Object.keys(data.data_summary).length > 0) {
                 setPerformanceSnapshot(data.data_summary);
             }
 
-            // Push schedule to the left timeline panel
             if (data.type === "schedule" && data.schedule && data.schedule.length > 0 && onScheduleCreated) {
                 const backendAlreadyMerged = Boolean(data.full_schedule_in_response);
                 const addIntent = Boolean(data.add_intent) && !backendAlreadyMerged;
@@ -242,15 +254,20 @@ export default function AIAssistant({
                     addIntent,
                 );
 
-                // Show deferred tasks as a follow-up message
                 if (data.deferred_tasks && data.deferred_tasks.length > 0) {
                     const deferredNames = data.deferred_tasks.map(t => t.task).join(", ");
                     const highPriority  = data.deferred_tasks.filter(t => t.priority === "high");
-                    let deferredMsg = `📅 **Moved to tomorrow:** ${deferredNames}\n\nThese tasks don't fit in your free time today.`;
+                    let deferredMsg = `📅 **Moved to tomorrow:** ${deferredNames}
+
+These tasks don't fit in your free time today.`;
                     if (highPriority.length > 0) {
-                        deferredMsg += `\n\n🔴 **${highPriority[0].task}** is high priority — consider removing a lower-priority task today to make room for it.`;
+                        deferredMsg += `
+
+🔴 **${highPriority[0].task}** is high priority — consider removing a lower-priority task today to make room for it.`;
                     }
-                    deferredMsg += `\n\n💡 Say "remove [task name]" to free up time, or "do [task] tomorrow" to keep it deferred.`;
+                    deferredMsg += `
+
+💡 Say "remove [task name]" to free up time, or "do [task] tomorrow" to keep it deferred.`;
                     setTimeout(() => {
                         setMessages(prev => [...prev, {
                             id:        Date.now() + 2,
@@ -265,26 +282,31 @@ export default function AIAssistant({
                 console.warn("Received empty schedule from AI");
             }
 
-            if (data.type === "schedule") {
-                setTimeout(loadRecommendations, 1000);
-            }
+            if (data.type === "schedule") setTimeout(loadRecommendations, 1000);
 
         } catch (err) {
             console.error("Chat error:", err);
+            // ✅ FIX: Auto-retry once before showing error to user
+            if (retryCount < 1) {
+                console.warn("Retrying sendMessage...");
+                setMessages(prev => prev.filter(m => m.id !== userMsg.id)); // remove user msg temporarily
+                setIsLoading(false);
+                setTimeout(() => sendMessage(messageText, retryCount + 1), 1500);
+                if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+                return;
+            }
             setMessages(prev => [...prev, {
                 id:        Date.now() + 1,
                 role:      "assistant",
-                content:   "I'm having trouble connecting. Please check the server and try again.",
+                content:   "Something went wrong. Please try again.",
                 type:      "error",
                 timestamp: new Date().toISOString(),
             }]);
         } finally {
-            if (loadingTimeoutRef.current) {
-                clearTimeout(loadingTimeoutRef.current);
-            }
+            if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
             setIsLoading(false);
         }
-    }, [input, isLoading, onScheduleCreated, loadRecommendations]);
+    }, [input, onScheduleCreated, loadRecommendations, mode]);
 
     // ── Quick actions ──────────────────────────────────────────────────────────
     // Planner button nudge messages — friendly guidance, not auto-scheduling
@@ -356,25 +378,19 @@ export default function AIAssistant({
         }
     }, [sendMessage]);
 
-    // ── NEW: Listen for external messages from Planner page (Phase 1) ───────────
-    // IMPORTANT: This MUST be placed AFTER sendMessage is defined
+    // ── Listen for external messages from Planner page ────────────────────────
     useEffect(() => {
         const handleExternalMessage = (event) => {
             const message = event.detail;
-            if (message && !isLoading) {
-                setInput(message);
-                setTimeout(() => {
-                    sendMessage(message);
-                }, 100);
+            // ✅ FIX: use ref to check loading state — avoids stale closure
+            if (message && !isLoadingRef.current) {
+                // ✅ FIX: don't setInput first (causes double-send) — just send directly
+                sendMessage(message);
             }
         };
-        
         window.addEventListener("sendAIMessage", handleExternalMessage);
-        
-        return () => {
-            window.removeEventListener("sendAIMessage", handleExternalMessage);
-        };
-    }, [isLoading, sendMessage]);
+        return () => window.removeEventListener("sendAIMessage", handleExternalMessage);
+    }, [sendMessage]);
 
     // ── Message renderer ───────────────────────────────────────────────────────
     const renderMessageContent = (msg) => {
@@ -398,7 +414,7 @@ export default function AIAssistant({
                         {(data?.suggestions || []).map((s, i) => (
                             <button
                                 key={i}
-                                onClick={() => { setInput(s); setTimeout(() => sendMessage(s), 80); }}
+                                onClick={() => sendMessage(s)}
                                 className="text-left text-sm px-3 py-2 rounded-lg
                                            bg-white border border-violet-200 text-violet-700
                                            hover:bg-violet-50 hover:border-violet-400
@@ -616,7 +632,7 @@ export default function AIAssistant({
                         {data.suggestions.map((s, i) => (
                             <button
                                 key={i}
-                                onClick={() => { setInput(s); setTimeout(() => sendMessage(s), 80); }}
+                                onClick={() => sendMessage(s)}
                                 className="w-full text-left text-xs px-3 py-2 rounded-lg
                                            bg-white border border-violet-200 text-violet-700
                                            hover:bg-violet-50 hover:border-violet-400
