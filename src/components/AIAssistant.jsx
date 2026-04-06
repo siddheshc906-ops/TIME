@@ -247,8 +247,16 @@ export default function AIAssistant({
             if (data.type === "schedule" && data.schedule && data.schedule.length > 0 && onScheduleCreated) {
                 const backendAlreadyMerged = Boolean(data.full_schedule_in_response);
                 const addIntent = Boolean(data.add_intent) && !backendAlreadyMerged;
+
+                // ✅ FIX: Strip break items from schedule before sending to the main planner
+                // Breaks are shown in the AI chat panel only — they should NOT be saved as
+                // separate schedule items (they caused task duplication on re-load)
+                const scheduleWithoutBreaks = (data.schedule || []).filter(
+                    item => item.type !== "break" && (item.task || "").toLowerCase() !== "short break"
+                );
+
                 onScheduleCreated(
-                    data.schedule,
+                    scheduleWithoutBreaks,
                     data.tasks_found || [],
                     data.insights    || [],
                     addIntent,
