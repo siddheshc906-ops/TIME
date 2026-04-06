@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { CircularProgressbar, buildStyles } from "react-circular-progressbar";
 import "react-circular-progressbar/dist/styles.css";
 
+const BASE_URL = process.env.REACT_APP_BACKEND_URL || process.env.REACT_APP_API_URL || "http://localhost:8000";
+
 export default function ProductivityScoreCard() {
   const [scoreData, setScoreData] = useState(null);
 
   useEffect(() => {
     const fetchScore = async () => {
-      const res = await fetch("http://localhost:8000/api/productivity-score", {
+      const res = await fetch(`${BASE_URL}/api/productivity-score`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
