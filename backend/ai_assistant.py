@@ -211,7 +211,13 @@ class AIAssistant:
                     "free all", "whole day free", "free till", "free until",
                     "am free", "till", "until", "after",
                 ]
-                if any(p in msg_lower for p in _checkin_reply_phrases):
+                # ✅ FIX: Also match pure time-window replies like "5 PM to 10 PM"
+                import re as _re_fix
+                _time_window_re = _re_fix.compile(
+                    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to|-|until)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+                    _re_fix.IGNORECASE,
+                )
+                if any(p in msg_lower for p in _checkin_reply_phrases) or _time_window_re.search(msg_lower):
                     return await self._get_pending_tasks_and_schedule(message)
 
             # ── 1. Smart context detection BEFORE SmartBrain can block it ─────
@@ -276,7 +282,20 @@ class AIAssistant:
         Detects high-intent contextual messages that look conversational
         but actually carry a scheduling / study need.
         Returns a context tag string or None.
+
+        ✅ FIX: If message already has explicit durations (e.g. "Python 2 hours, Maths 1 hour"),
+        return None so the NLP/scheduling pipeline handles it directly instead of asking
+        follow-up questions the user already answered.
         """
+        import re as _re_ctx
+        # If message has 2+ duration mentions, it's already a complete task list — don't intercept
+        duration_count = len(_re_ctx.findall(
+            r"\d+(?:\.\d+)?\s*(?:hours?|hrs?|h\b|minutes?|mins?|min\b)",
+            msg, _re_ctx.IGNORECASE
+        ))
+        if duration_count >= 2:
+            return None
+
         # Exam / test urgency
         if any(w in msg for w in ["exam", "test", "quiz", "viva", "finals", "boards"]):
             return "exam"
@@ -569,32 +588,41 @@ class AIAssistant:
 
     async def _build_exam_schedule(
         self, subjects: List[str], urgency: str,
-        free_start: float, free_end: float, message: str
+        free_start: float, free_end: float, message: str,
+        subject_durations: Dict[str, float] = None
     ) -> Dict[str, Any]:
-        """Build a science-backed exam study schedule using spaced repetition, Pomodoro blocks, and interleaving."""
+        """Build a science-backed exam study schedule using spaced repetition, Pomodoro blocks, and interleaving.
+        
+        subject_durations: optional dict mapping subject name → hours (respects user-specified durations)
+        """
         total_free = free_end - free_start
         n = len(subjects)
         if n == 0:
             return await self._enhanced_general_chat(message)
 
-        time_per_subject = min(2.0, max(0.75, round(total_free / n, 1)))
         usable_end = free_end - 0.5
 
         schedule = []
         cursor = free_start
 
         for i, subject in enumerate(subjects):
-            if cursor + time_per_subject > usable_end:
+            # ✅ FIX: Use user-specified duration if available, else calculate fair share
+            if subject_durations and subject.lower() in subject_durations:
+                time_for_subject = subject_durations[subject.lower()]
+            else:
+                time_for_subject = min(2.0, max(0.75, round(total_free / n, 1)))
+
+            if cursor + time_for_subject > usable_end:
                 break
             start_str = self._dec_to_str(cursor)
-            end_time  = cursor + time_per_subject
+            end_time  = cursor + time_for_subject
             end_str   = self._dec_to_str(end_time)
             schedule.append({
                 "task":         "Study " + subject.title(),
                 "start_time":   cursor,
                 "end_time":     end_time,
                 "time":         start_str + " - " + end_str,
-                "duration":     time_per_subject,
+                "duration":     time_for_subject,
                 "priority":     "high",
                 "category":     "study",
                 "energy_score": 0.9 if i == 0 else 0.7,
@@ -706,9 +734,9 @@ class AIAssistant:
 
         today_str = datetime.now().date().isoformat()
 
-        # ── Daily check-in: ask what today looks like before scheduling ──────
-        # Only ask once per day, and only if we have no date-specific context
-        should_ask = await self._should_ask_daily_checkin()
+        # ── Ask for time window ONCE if not already specified in this conversation ──
+        # Uses conversation history — no stale DB state possible.
+        should_ask = await self._should_ask_time_window(message, conversation_history)
         if should_ask:
             return await self._daily_checkin_response(message, tasks)
 
@@ -718,6 +746,11 @@ class AIAssistant:
             {"user_id": self.user_id, "date": today_str}
         )
         existing_schedule = (existing_plan or {}).get("schedule", [])
+        # ✅ FIX: Strip break items so they don't block free slots or cause duplicates
+        existing_schedule = [
+            s for s in existing_schedule
+            if s.get("type") != "break" and s.get("task", "").lower() != "short break"
+        ]
 
         schedule = self._find_free_slots(day_ctx, existing_schedule, tasks)
 
@@ -1139,81 +1172,114 @@ Respond with:
             } if schedule_result.get("total_focus_time") else None
         }
     
-    async def _should_ask_daily_checkin(self) -> bool:
+    def _message_has_time_window(self, message: str) -> bool:
         """
-        Returns True if we should ask the user about today's schedule.
-        We ask ONLY when ALL of these are true:
-          - No check-in has been done today yet
-          - No date-specific override exists for today
-          - No general saved routine exists
-          - Today is a weekday (weekends are assumed free)
-        This avoids interrupting the user every time they add a single task.
+        Returns True if the message already contains an explicit time window.
+        e.g. "free from 5 PM", "5 PM to 10 PM", "after 4pm", "from 6 to 11"
+        """
+        import re as _re_tw
+        msg = message.lower()
+        patterns = [
+            r"\bfree\s+from\b",
+            r"\bfree\s+after\b",
+            r"\bfree\s+till\b",
+            r"\bfree\s+until\b",
+            r"\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+            r"\bafter\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+            r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to|-|until)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+            r"\btill\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+            r"\buntil\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)",
+            r"\bjust\s+schedule\s+it\b",
+            r"\bfree\s+all\s+day\b",
+        ]
+        return any(_re_tw.search(p, msg) for p in patterns)
+
+    def _conversation_already_has_time_window(self, conversation_history: list) -> bool:
+        """
+        Check if the current conversation already contains a time-window exchange.
+        Returns True if:
+          - The AI already asked "what time are you free" in this conversation, AND
+          - The user has already replied with a time window
+        If True → skip asking again (user already told us in this session).
+        """
+        if not conversation_history:
+            return False
+        # Check if AI has already asked the time-window question in this conversation
+        ai_asked = any(
+            "what time are you free" in (m.get("content") or "").lower() or
+            "what time range" in (m.get("content") or "").lower() or
+            "one quick question" in (m.get("content") or "").lower()
+            for m in conversation_history if m.get("role") == "assistant"
+        )
+        if not ai_asked:
+            return False
+        # AI asked — check if user replied with a time window after that
+        # Find the last AI ask index, then check user messages after it
+        last_ask_idx = -1
+        for i, m in enumerate(conversation_history):
+            if m.get("role") == "assistant" and (
+                "what time are you free" in (m.get("content") or "").lower() or
+                "one quick question" in (m.get("content") or "").lower()
+            ):
+                last_ask_idx = i
+        if last_ask_idx == -1:
+            return False
+        # Check user messages after the ask
+        for m in conversation_history[last_ask_idx + 1:]:
+            if m.get("role") == "user" and self._message_has_time_window(m.get("content", "")):
+                return True
+        return False
+
+    async def _should_ask_time_window(self, message: str, conversation_history: list = []) -> bool:
+        """
+        Returns True if AI should ask for a time window before scheduling.
+
+        Priority order (simplest and most reliable):
+          1. Message already has a time window → NO, schedule directly
+          2. This conversation already had a time-window Q&A → NO, already answered
+          3. User already set a date-specific override for today → NO
+          4. Otherwise → YES, ask once
         """
         from datetime import datetime as _dt
-        today_dt  = _dt.now()
-        today_str = today_dt.date().isoformat()
-        weekday   = today_dt.weekday()
+        today_str = _dt.now().date().isoformat()
 
-        # Never ask on weekends — assume free day
-        if weekday >= 5:
+        # 1. Message itself already has the time window
+        if self._message_has_time_window(message):
             return False
 
-        try:
-            # Already asked today?
-            asked = await self.db.user_day_context.find_one(
-                {"user_id": self.user_id, "checkin_date": today_str}
-            )
-            if asked:
-                return False
+        # 2. This conversation already had the time-window exchange
+        if self._conversation_already_has_time_window(conversation_history):
+            return False
 
-            # Date-specific override already set?
+        # 3. User already gave us a time window today via a previous conversation
+        try:
             override = await self.db.user_day_context.find_one(
                 {"user_id": self.user_id, "date_override": today_str}
             )
             if override:
                 return False
-
-            # General saved routine already set? (means user told us once)
-            general = await self.db.user_day_context.find_one(
-                {"user_id": self.user_id, "date_override": {"$exists": False},
-                 "has_custom": True}
-            )
-            if general:
-                return False
-
-            return True
-        except Exception:
-            return False
-
-    async def _mark_checkin_done(self, today_str: str) -> None:
-        """Record that we've done the daily check-in so we don't ask again."""
-        try:
-            await self.db.user_day_context.update_one(
-                {"user_id": self.user_id, "checkin_date": today_str},
-                {"$set": {"user_id": self.user_id, "checkin_date": today_str}},
-                upsert=True,
-            )
         except Exception:
             pass
+
+        # All checks passed → ask for the time window
+        return True
+
+    async def _mark_checkin_done(self, today_str: str) -> None:
+        """No-op kept for backward compatibility — tracking is now conversation-based."""
+        pass
 
     async def _daily_checkin_response(self, original_message: str,
                                        tasks: List[Dict]) -> Dict[str, Any]:
         """
-        Instead of scheduling immediately, ask the user what today looks like
-        and store the tasks temporarily so we can schedule after they reply.
+        Ask the user ONE TIME for their available time window, then save pending
+        tasks so the next reply can schedule immediately without further questions.
         """
         from datetime import datetime as _dt
-        today_str   = _dt.now().date().isoformat()
-        ctx         = await self._get_day_context(today_str)
-        weekday     = ctx.get("weekday_name", "today")
-        source      = ctx.get("source", "")
-        is_assumed  = "smart_default" in source
-        is_learned  = "learned" in source
+        today_str = _dt.now().date().isoformat()
+        ctx       = await self._get_day_context(today_str)
+        source    = ctx.get("source", "")
 
-        # Mark that we asked today so we don't loop
-        await self._mark_checkin_done(today_str)
-
-        # Save pending tasks so next message can use them
+        # Save pending tasks so the time-window reply can schedule them immediately
         try:
             await self.db.user_pending_context.update_one(
                 {"user_id": self.user_id},
@@ -1228,43 +1294,45 @@ Respond with:
         except Exception as e:
             logger.error(f"Could not save pending tasks: {e}")
 
-        if is_learned:
-            assumed_start = self._dec_to_str(ctx.get("day_start", 16.0))
-            note = (
-                f"Based on your past {weekday}s I'll assume you're free from "
-                f"around {assumed_start} — but is that right today?"
-            )
-        elif is_assumed:
-            note = (
-                f"Since it's {weekday} I've assumed you might have college "
-                f"until around 4 PM — but every day is different!"
-            )
-        else:
-            note = f"Just checking since every {weekday} can be different!"
-
         task_names = [t.get("name", "task") for t in tasks]
         task_list  = ", ".join(task_names)
 
+        # Build a context-aware hint based on saved routine
+        has_routine = "saved_routine" in source or ctx.get("has_custom", False)
+        if has_routine:
+            routine_start = self._dec_to_str(ctx.get("day_start", 16.25))
+            routine_end   = self._dec_to_str(ctx.get("day_end", 23.0))
+            hint = (
+                f"Your routine has you free from **{routine_start}** to **{routine_end}** — "
+                f"is that still the case today, or do you have a different window?"
+            )
+            suggestions = [
+                f"Free from {routine_start} to {routine_end}",
+                "Free from 5 PM to 10 PM",
+                "Just schedule it",
+            ]
+        else:
+            hint = "Just let me know your free window and I'll schedule everything straight away."
+            suggestions = [
+                "Free from 5 PM to 10 PM",
+                "Free all day",
+                "Just schedule it",
+            ]
+
         newline = "\n"
         checkin_msg = (
-            f"Got it \u2014 I'll schedule {task_list} for you. "
-            + note
-            + newline + newline
-            + f"📅 What does your {weekday} look like today?" + newline
-            + "Just tell me in one line, e.g.:" + newline
-            + "\u2022 'College 9 AM to 2 PM, free after that'" + newline
-            + "\u2022 'Free all day'" + newline
-            + "\u2022 'Work from 10 to 6, dinner at 7'" + newline + newline
-            + "Or just say 'just schedule it' and I'll use my best guess!"
+            f"Got it \u2014 scheduling **{task_list}** for you.\u2003"
+            f"One quick question before I build your plan:\n\n"
+            f"\U0001f4c5 **What time are you free today?**\n"
+            f"{hint}\n\n"
+            f"e.g. \u2022 'Free from 5 PM to 10 PM'\n"
+            f"     \u2022 'After 4 PM'\n"
+            f"     \u2022 'Just schedule it' \u2014 and I'll use your saved routine"
         )
         return {
-            "type":    "checkin",
-            "message": checkin_msg,
-            "suggestions": [
-                "Free all day",
-                "College 9 AM to 4 PM",
-                "Just schedule it",
-            ],
+            "type":         "checkin",
+            "message":      checkin_msg,
+            "suggestions":  suggestions,
             "pending_tasks": task_names,
         }
 
@@ -1286,8 +1354,12 @@ Respond with:
 
         # Parse context from the reply
         msg_lower = message.lower()
-        if "free all day" in msg_lower or "just schedule it" in msg_lower or "no college" in msg_lower:
-            # Use weekend-style defaults — free all day
+        if "just schedule it" in msg_lower:
+            # User wants us to use the saved routine — fetch it as-is
+            ctx = await self._get_day_context(today_str)
+            ctx["date_override"] = today_str
+        elif "free all day" in msg_lower or "no college" in msg_lower or "no school" in msg_lower:
+            # User says they're free all day — use wide open window
             ctx = {
                 "wake_up": 7.0, "day_start": 9.0,
                 "lunch_start": 13.0, "lunch_end": 14.0,
@@ -1296,16 +1368,34 @@ Respond with:
                 "date_override": today_str,
             }
         else:
-            # Parse routine from their reply and save as date-specific override
-            routine_response = await self._parse_and_save_routine(message)
+            # Parse time window from their reply (e.g. "Free from 5 PM to 10 PM")
+            await self._parse_and_save_routine(message)
             ctx = await self._get_day_context(today_str)
             ctx["date_override"] = today_str
 
         # Save as today's override
         await self._save_day_context({**ctx, "date_override": today_str})
 
-        # Now schedule the pending tasks
+        # ✅ FIX: Use pending tasks from DB — but respect user-specified durations
+        # if the message itself contains task+duration info (e.g. "Python 2h, Maths 1h")
         tasks = (pending_doc or {}).get("pending_tasks", [])
+
+        # ✅ FIX: Try to re-extract tasks from the current message in case user
+        # included tasks/durations directly (e.g. "Python for 2h, Maths 1h, DSA 3h")
+        try:
+            freshly_extracted = await self._manual_extract_tasks(message)
+            # Only use fresh extraction if it found tasks with real durations
+            # and not just time-window info
+            import re as _re_msg
+            _has_task_content = bool(_re_msg.search(
+                r"(study|python|maths?|dsa|physics|chemistry|biology|code|gym|read|write|work)",
+                message, _re_msg.IGNORECASE
+            ))
+            if freshly_extracted and _has_task_content:
+                tasks = freshly_extracted
+        except Exception:
+            pass
+
         if not tasks:
             return {
                 "type":    "chat",
@@ -1316,6 +1406,11 @@ Respond with:
             {"user_id": self.user_id, "date": today_str}
         )
         existing_schedule = (existing_plan or {}).get("schedule", [])
+        # ✅ FIX: Strip existing breaks from existing_schedule before computing free slots
+        existing_schedule = [
+            s for s in existing_schedule
+            if not s.get("type") == "break" and s.get("task", "").lower() != "short break"
+        ]
         schedule = self._find_free_slots(ctx, existing_schedule, tasks)
 
         task_names = [t.get("name", "task") for t in tasks]
@@ -1325,7 +1420,7 @@ Respond with:
             "tasks_found": task_names,
             "schedule":    schedule,
             "insights":    [
-                f"📅 Scheduled around your day — tasks placed in your free time only!"
+                "📅 Scheduled around your day — tasks placed in your free time only!"
             ],
         }
 
@@ -1779,9 +1874,14 @@ Respond with:
             {"user_id": self.user_id, "date": today_str}
         )
         existing_schedule = (existing_plan or {}).get("schedule", [])
+        # ✅ FIX: Strip break items so they don't block free slots or cause duplicates
+        existing_schedule_no_breaks = [
+            s for s in existing_schedule
+            if s.get("type") != "break" and s.get("task", "").lower() != "short break"
+        ]
 
         # No schedule yet → use full create flow (triggers check-in if needed)
-        if not existing_schedule:
+        if not existing_schedule_no_breaks:
             return await self._create_schedule_with_nlp(message)
 
         # Extract task(s) from the message
@@ -1819,7 +1919,7 @@ Respond with:
 
         # Place tasks after existing schedule using day context
         day_ctx  = await self._get_day_context(today_str)
-        schedule = self._find_free_slots(day_ctx, existing_schedule, tasks)
+        schedule = self._find_free_slots(day_ctx, existing_schedule_no_breaks, tasks)
 
         task_names = [t["name"] for t in tasks]
         plural = "tasks" if len(tasks) > 1 else "task"
