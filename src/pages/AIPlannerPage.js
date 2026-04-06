@@ -1123,9 +1123,12 @@ export default function AIPlannerPage() {
                       <Bot size={36} className="text-violet-400" />
                     </div>
                     <h3 className="text-lg font-semibold text-gray-700 mb-2">No plan yet</h3>
-                    <p className="text-sm text-gray-400 max-w-xs mb-8">
+                    <p className="text-sm text-gray-400 max-w-xs mb-2">
                       Open the AI Assistant and describe your day. I'll build
                       a personalised schedule in seconds.
+                    </p>
+                    <p className="text-xs text-violet-400 max-w-xs mb-8 italic">
+                      The more you use it, the smarter it gets about your personal rhythm.
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-xl">
                       {[
