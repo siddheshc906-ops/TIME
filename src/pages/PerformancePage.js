@@ -367,11 +367,35 @@ export default function PerformancePage() {
   const fetchAllData = async () => {
     setLoading(true); setError(null);
     try {
-      await Promise.all([
-        fetchTasks(), fetchAccuracy(), fetchPatterns(), fetchAnalytics(),
-        fetchProductivityScore(), fetchChronotypeData(), fetchAIInsightsData(),
-        fetchFeedbackData(), fetchProductivityProfile(), fetchFocusStats(), fetchPlannerStats(),
+      // Run all fetches in parallel, collect key counts for userState decision
+      const [taskCount, focusData, plannerData, feedbackData] = await Promise.all([
+        fetchTasks(),
+        fetchFocusStats(),
+        fetchPlannerStats(),
+        fetchFeedbackData(),
       ]);
+      // Run remaining fetches that don't affect userState
+      await Promise.all([
+        fetchAccuracy(), fetchPatterns(), fetchAnalytics(),
+        fetchProductivityScore(), fetchChronotypeData(),
+        fetchAIInsightsData(), fetchProductivityProfile(),
+      ]);
+
+      // Determine userState from ALL pages — not just Planner task count
+      const hasPlanner   = (taskCount || 0) > 0;
+      const hasFocus     = (focusData?.totalMinutes || 0) > 0 || (focusData?.sessionCount || 0) > 0;
+      const hasAIPlanner = (plannerData?.planCount || 0) > 0;
+      const hasFeedback  = (feedbackData?.total || 0) > 0;
+
+      if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback) {
+        setUserState('new');
+      } else if ((taskCount || 0) < 5) {
+        setUserState('beginner');
+      } else if ((taskCount || 0) < 15) {
+        setUserState('intermediate');
+      } else {
+        setUserState('active');
+      }
     } catch (err) {
       setError("Failed to load performance data");
       toast.error("Failed to load performance data");
@@ -385,17 +409,10 @@ export default function PerformancePage() {
         const data = await res.json();
         const count = Array.isArray(data) ? data.length : 0;
         setTaskCount(count);
-        // Check focus sessions from localStorage so focus-only users don't see welcome screen
-        const storedFocus = localStorage.getItem("focusStats");
-        const hasFocusSessions = storedFocus
-          ? (JSON.parse(storedFocus)?.sessions?.length > 0 || JSON.parse(storedFocus)?.totalMinutes > 0)
-          : false;
-        if (count === 0 && !hasFocusSessions) setUserState('new');
-        else if (count < 5) setUserState('beginner');
-        else if (count < 15) setUserState('intermediate');
-        else setUserState('active');
+        return count;
       }
-    } catch (err) { console.error(err); }
+      return 0;
+    } catch (err) { console.error(err); return 0; }
   };
 
   const fetchAccuracy = async () => {
@@ -468,7 +485,8 @@ export default function PerformancePage() {
         Object.entries(categoryMap).forEach(([cat, { total, count }]) => { fc[cat] = (total / count).toFixed(2); });
         setCategoryAccuracy(fc);
       }
-    } catch { }
+      return { total: data.history?.length || 0 };
+    } catch { return { total: 0 }; }
   };
 
   const fetchProductivityProfile = async () => {
@@ -484,26 +502,34 @@ export default function PerformancePage() {
 
   const fetchFocusStats = async () => {
     try {
-      // Load localStorage first — FocusPage always writes here on session complete
-      const storedStats = localStorage.getItem("focusStats");
+      // Use user-scoped key so different accounts don't share focus stats
+      let userId = 'default';
+      try {
+        const token = localStorage.getItem("token");
+        if (token) userId = JSON.parse(atob(token.split('.')[1])).sub || 'default';
+      } catch {}
+      const storedStats = localStorage.getItem(`focusStats_${userId}`) || localStorage.getItem("focusStats");
       const localData = storedStats ? JSON.parse(storedStats) : null;
       if (localData) setFocusStats(localData);
 
-      // Read from /api/task-feedback — the same endpoint FocusPage posts to
+      // Also read from backend task-feedback for AI Planner recorded sessions
       const res = await fetch(`${BASE_URL}/api/task-feedback`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         const history = data.history || [];
         const focusSessions = history.filter(h => h.name === "Focus Session" || h.name?.includes("Focus"));
         const totalMinutes = focusSessions.reduce((sum, s) => sum + (s.actualTime || s.aiTime || 0) * 60, 0);
-        setFocusStats(prev => ({
-          ...prev,
-          // Keep whichever source has more data (avoid overwriting localStorage with empty API)
-          totalMinutes: Math.max(totalMinutes, prev?.totalMinutes || 0),
-          sessionCount: Math.max(focusSessions.length, prev?.sessions?.length || prev?.sessionCount || 0),
-        }));
+        const merged = {
+          totalMinutes: Math.max(totalMinutes, localData?.totalMinutes || 0),
+          sessionCount: Math.max(focusSessions.length, localData?.sessions?.length || localData?.sessionCount || 0),
+          streak: localData?.streak || 0,
+          sessions: localData?.sessions || [],
+        };
+        setFocusStats(merged);
+        return merged;
       }
-    } catch { }
+      return localData;
+    } catch { return null; }
   };
 
   const fetchPlannerStats = async () => {
@@ -513,9 +539,12 @@ export default function PerformancePage() {
         const data = await res.json();
         const plans = Array.isArray(data) ? data : data.plans || [];
         const totalScheduled = plans.reduce((sum, p) => sum + (p.schedule?.length || p.task_count || 0), 0);
-        setPlannerStats({ planCount: plans.length, totalScheduled, recentPlan: plans[0] || null });
+        const result = { planCount: plans.length, totalScheduled, recentPlan: plans[0] || null };
+        setPlannerStats(result);
+        return result;
       }
-    } catch { }
+      return { planCount: 0, totalScheduled: 0 };
+    } catch { return { planCount: 0, totalScheduled: 0 }; }
   };
 
   const trainModel = async () => {
