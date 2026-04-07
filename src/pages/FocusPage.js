@@ -36,6 +36,17 @@ function authHeaders() {
   };
 }
 
+function getFocusStatsKey() {
+  try {
+    const token = localStorage.getItem("token");
+    if (token) {
+      const userId = JSON.parse(atob(token.split('.')[1])).sub || 'default';
+      return `focusStats_${userId}`;
+    }
+  } catch {}
+  return 'focusStats';
+}
+
 // Background options with clearer gradients and beautiful images
 const backgrounds = [
   { 
@@ -193,7 +204,7 @@ export const FocusPage = () => {
       });
       
       // Also store in localStorage for quick access
-      const storedStats = localStorage.getItem("focusStats");
+      const storedStats = localStorage.getItem(getFocusStatsKey());
       let stats = storedStats ? JSON.parse(storedStats) : {
         totalMinutes: 0,
         weeklyMinutes: 0,
@@ -240,7 +251,7 @@ export const FocusPage = () => {
         stats.currentWeek = currentWeek;
       }
       
-      localStorage.setItem("focusStats", JSON.stringify(stats));
+      localStorage.setItem(getFocusStatsKey(), JSON.stringify(stats));
       
       // Update state
       setTotalFocusMinutes(stats.totalMinutes);
@@ -308,7 +319,7 @@ export const FocusPage = () => {
       }
       
       // Also load from localStorage for additional stats
-      const storedStats = localStorage.getItem("focusStats");
+      const storedStats = localStorage.getItem(getFocusStatsKey());
       if (storedStats) {
         const stats = JSON.parse(storedStats);
         setWeeklyFocusMinutes(stats.weeklyMinutes || 0);
@@ -320,7 +331,7 @@ export const FocusPage = () => {
       console.error("Failed to load focus stats:", err);
       
       // Fallback to localStorage only
-      const storedStats = localStorage.getItem("focusStats");
+      const storedStats = localStorage.getItem(getFocusStatsKey());
       if (storedStats) {
         const stats = JSON.parse(storedStats);
         setTotalFocusMinutes(stats.totalMinutes || 0);
