@@ -159,6 +159,9 @@ export default function AIPlannerPage() {
     } catch { return { occupation: "student", wakeTime: "07:00", sleepTime: "23:00", busyStart: "09:00", busyEnd: "17:00", busyLabel: "College", hasBusy: true }; }
   });
   const [routineSaving, setRoutineSaving] = useState(false);
+  const [pendingMessageAfterRoutine, setPendingMessageAfterRoutine] = useState(null);
+  const [isFirstTimeRoutine, setIsFirstTimeRoutine] = useState(false);
+  const [routineSkipped, setRoutineSkipped] = useState(false);
 
   // ── fetch today's plan ───────────────────────────────────────────────────
   // ✅ FIX: ref so callbacks can always call latest fetchPlan without circular deps
@@ -339,12 +342,44 @@ export default function AIPlannerPage() {
         body: JSON.stringify({ message }),
       });
       setShowRoutineModal(false);
+      setIsFirstTimeRoutine(false);
+      setRoutineSkipped(false);
       toast && toast.success ? toast.success("Routine saved! AI will now schedule around your hours.") : alert("Routine saved!");
+      // ── Fire the pending message that triggered this popup ──
+      if (pendingMessageAfterRoutine) {
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("sendAIMessage", { detail: pendingMessageAfterRoutine }));
+          setPendingMessageAfterRoutine(null);
+        }, 500);
+      }
     } catch (e) {
       console.error("Failed to save routine:", e);
     } finally {
       setRoutineSaving(false);
     }
+  };
+
+  // Check if user has a routine set
+  const hasRoutineSet = () => {
+    try {
+      return !!localStorage.getItem("user-routine");
+    } catch { return false; }
+  };
+
+  // Check if message has explicit time mentioned
+  const hasExplicitTime = (msg) => {
+    return /\b(at\s+\d|\d+\s*(am|pm)|\d+:\d+|morning|afternoon|evening|night|tonight|today at)\b/i.test(msg);
+  };
+
+  // Called by AIAssistant before sending a message — intercept if no routine
+  const handleBeforeAssistantMessage = (message) => {
+    if (!hasRoutineSet() && !hasExplicitTime(message)) {
+      setPendingMessageAfterRoutine(message);
+      setIsFirstTimeRoutine(true);
+      setShowRoutineModal(true);
+      return false; // block the message
+    }
+    return true; // allow the message
   };
 
   // ── Pending task selection ────────────────────────────────────────────────
@@ -1199,11 +1234,43 @@ export default function AIPlannerPage() {
       <div className={`fixed top-0 right-0 h-full z-50 transition-all duration-300 ease-in-out ${
         showAssistant ? "translate-x-0" : "translate-x-full"
       }`}>
+        {/* Skipped-routine nudge banner */}
+        {routineSkipped && showAssistant && (
+          <div className="absolute top-16 left-0 right-0 z-10 mx-3">
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2 shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">💡</span>
+                <p className="text-xs text-amber-800 leading-snug">
+                  <span className="font-semibold">Mention your free hours</span> — e.g. <em>"I'm free 6–10pm"</em>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setIsFirstTimeRoutine(false);
+                  setShowRoutineModal(true);
+                }}
+                className="text-[10px] font-semibold text-violet-600 whitespace-nowrap bg-violet-50 hover:bg-violet-100 border border-violet-200 px-2 py-1 rounded-lg transition-colors"
+              >
+                Set routine
+              </button>
+            </motion.div>
+          </div>
+        )}
         <AIAssistant
           key={selectedDate}
           isOpen={showAssistant}
           onClose={() => setShowAssistant(false)}
           onScheduleCreated={handleScheduleCreated}
+          onBeforeMessage={handleBeforeAssistantMessage}
+          routineSkipped={routineSkipped}
+          onSetupRoutine={() => {
+            setIsFirstTimeRoutine(false);
+            setShowRoutineModal(true);
+          }}
         />
       </div>
 
@@ -1310,12 +1377,20 @@ export default function AIPlannerPage() {
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
             <div className="flex items-center justify-between mb-5">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">My Daily Routine</h2>
-                <p className="text-sm text-gray-500 mt-0.5">AI will schedule tasks around your real hours</p>
+                <h2 className="text-xl font-bold text-gray-900">
+                  {isFirstTimeRoutine ? "Quick setup before we start! 🚀" : "My Daily Routine"}
+                </h2>
+                <p className="text-sm text-gray-500 mt-0.5">
+                  {isFirstTimeRoutine
+                    ? "Tell the AI your hours so it schedules around your life"
+                    : "AI will schedule tasks around your real hours"}
+                </p>
               </div>
-              <button onClick={() => setShowRoutineModal(false)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400">
-                <X size={18} />
-              </button>
+              {!isFirstTimeRoutine && (
+                <button onClick={() => setShowRoutineModal(false)} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400">
+                  <X size={18} />
+                </button>
+              )}
             </div>
 
             <div className="space-y-4">
@@ -1391,15 +1466,37 @@ export default function AIPlannerPage() {
               </div>
             </div>
 
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowRoutineModal(false)}
-                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
-                Cancel
-              </button>
-              <button onClick={saveRoutine} disabled={routineSaving}
-                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity">
-                {routineSaving ? "Saving..." : "Save Routine"}
-              </button>
+            <div className="flex flex-col gap-2 mt-6">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowRoutineModal(false);
+                    setIsFirstTimeRoutine(false);
+                    setRoutineSkipped(true);
+                    // If skipping with a pending message, still fire it
+                    if (pendingMessageAfterRoutine) {
+                      setTimeout(() => {
+                        window.dispatchEvent(new CustomEvent("sendAIMessage", { detail: pendingMessageAfterRoutine }));
+                        setPendingMessageAfterRoutine(null);
+                      }, 300);
+                    }
+                  }}
+                  className="flex-1 py-2.5 rounded-xl border border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:bg-gray-50 hover:border-gray-400 transition-colors">
+                  {isFirstTimeRoutine ? "I'll set this later" : "Cancel"}
+                </button>
+                <button onClick={saveRoutine} disabled={routineSaving}
+                  className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity shadow-sm">
+                  {routineSaving ? "Saving..." : "Save Routine ✓"}
+                </button>
+              </div>
+              {isFirstTimeRoutine && (
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5 mt-1">
+                  <span className="text-sm leading-none mt-0.5">⚡</span>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    <span className="font-semibold">Skip for now —</span> just mention your free hours in the chat and I'll work around them 🙏
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
