@@ -19,9 +19,12 @@ export default function AIAssistant({
     onClose,
     isOpen,
     onScheduleCreated,
+    onBeforeMessage,
     initialMessages = [],
     setMessages: parentSetMessages,
     mode = "planner",   // "planner" | "coach" — coach routes to /api/ai/guidance
+    routineSkipped = false,
+    onSetupRoutine,
 }) {
     const [messages,                setMessages]                = useState(initialMessages);
     const [input,                   setInput]                   = useState("");
@@ -183,6 +186,15 @@ export default function AIAssistant({
     const sendMessage = useCallback(async (overrideText, retryCount = 0) => {
         const messageText = (overrideText ?? input).trim();
         if (!messageText || isLoadingRef.current) return; // ✅ FIX: use ref not stale state
+
+        // ── Intercept: check routine before sending if handler provided ──
+        if (onBeforeMessage && retryCount === 0) {
+            const allowed = onBeforeMessage(messageText);
+            if (!allowed) {
+                setInput(""); // clear input since it's been captured
+                return;
+            }
+        }
 
         const userMsg = {
             id:        Date.now(),
@@ -797,6 +809,24 @@ These tasks don't fit in your free time today.`;
                                                     Just tell me what's on your mind — studying, work, gym, errands, anything. I'll understand the context and build a smart plan around your day.
                                                 </p>
 
+                                                {/* Routine skipped nudge in empty state */}
+                                                {routineSkipped && onSetupRoutine && (
+                                                    <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-sm">⚡</span>
+                                                            <p className="text-xs text-amber-800 leading-snug">
+                                                                <span className="font-semibold">No routine set</span> — mention your free hours in chat, or set it up once for smarter scheduling.
+                                                            </p>
+                                                        </div>
+                                                        <button
+                                                            onClick={onSetupRoutine}
+                                                            className="text-[10px] font-semibold text-violet-600 whitespace-nowrap bg-white hover:bg-violet-50 border border-violet-200 px-2 py-1 rounded-lg transition-colors flex-shrink-0"
+                                                        >
+                                                            Set routine →
+                                                        </button>
+                                                    </div>
+                                                )}
+
                                                 <div className="space-y-1.5">
                                                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Try saying</p>
                                                     {[
@@ -886,6 +916,28 @@ These tasks don't fit in your free time today.`;
                                     </div>
                                 )}
                             </div>
+
+                            {/* Routine skipped nudge — shown above input when user skipped setup */}
+                            {routineSkipped && mode !== "coach" && (
+                                <div className="px-4 pt-3 pb-0">
+                                    <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                            <span className="text-base flex-shrink-0">⚡</span>
+                                            <p className="text-xs text-amber-800 leading-snug">
+                                                <span className="font-semibold">Tip:</span> Mention your free hours — e.g. <em className="not-italic font-medium">"I'm free 6–10pm"</em>
+                                            </p>
+                                        </div>
+                                        {onSetupRoutine && (
+                                            <button
+                                                onClick={onSetupRoutine}
+                                                className="text-[10px] font-semibold text-violet-600 whitespace-nowrap bg-white hover:bg-violet-50 border border-violet-200 hover:border-violet-300 px-2 py-1 rounded-lg transition-colors flex-shrink-0"
+                                            >
+                                                Set routine →
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Input */}
                             <div className="p-4 border-t bg-white">
