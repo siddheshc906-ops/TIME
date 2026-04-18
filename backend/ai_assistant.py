@@ -15,6 +15,7 @@ from ai.scheduler import IntelligentScheduler
 from ai.analyzer import ProductivityAnalyzer
 from ai.learner import AdaptiveLearner
 from ai.recommender import TaskRecommender
+from ai.intelligent_chat import IntelligentChatEngine
 
 logger = logging.getLogger(__name__)
 
@@ -163,119 +164,27 @@ class AIAssistant:
     
     async def process_message(self, message: str, conversation_history: list = []) -> Dict[str, Any]:
         """
-        Main entry point — smart conversational AI that understands context,
-        not just keywords. Handles vague, emotional, and multi-intent messages.
-        conversation_history: list of {role, content} dicts from the frontend.
+        Intelligent conversational AI entry point.
+        Every message is handled by Gemini with full user context —
+        no keyword routing, no rigid intent matching.
+        Understands anything the user types, just like Claude does.
         """
-        try:
-            import time as _time
-            from datetime import datetime as _dt
+        import time as _time
 
-            # ✅ FIX: Per-user cooldown to prevent rapid double-sends
-            now = _time.time()
-            last = _user_last_request.get(self.user_id, 0)
-            if now - last < _USER_COOLDOWN_SECONDS:
-                return {
-                    "type": "chat",
-                    "message": "Please wait a moment before sending another message.",
-                    "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
-                }
-            _user_last_request[self.user_id] = now
-
-            today_str = _dt.now().date().isoformat()
-            msg_lower = message.lower().strip()
-            # ✅ Store history for use in downstream handlers
-            self._conversation_history = conversation_history or []
-
-            # ── Get existing schedule status for context ───────────────────────
-            existing_plan = await self.db.daily_plans.find_one(
-                {"user_id": self.user_id, "date": today_str}
-            )
-            has_schedule = bool((existing_plan or {}).get("schedule"))
-
-            # ── 0. Check for pending follow-up context FIRST ──────────────────
-            # (user is replying to a question the AI asked)
-            pending_doc = None
-            try:
-                pending_doc = await self.db.user_pending_context.find_one(
-                    {"user_id": self.user_id, "date": today_str}
-                )
-            except Exception:
-                pass
-
-            if pending_doc:
-                _checkin_reply_phrases = [
-                    "free all day", "just schedule it", "no college",
-                    "no school", "college from", "school from", "work from",
-                    "busy from", "free from", "free after", "i'm free", "i am free",
-                    "free all", "whole day free", "free till", "free until",
-                    "am free", "till", "until", "after",
-                ]
-                # ✅ FIX: Also match pure time-window replies like "5 PM to 10 PM"
-                import re as _re_fix
-                _time_window_re = _re_fix.compile(
-                    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to|-|until)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)",
-                    _re_fix.IGNORECASE,
-                )
-                if any(p in msg_lower for p in _checkin_reply_phrases) or _time_window_re.search(msg_lower):
-                    return await self._get_pending_tasks_and_schedule(message)
-
-            # ── 1. Smart context detection BEFORE SmartBrain can block it ─────
-            # Catch high-intent messages that look like chat but carry scheduling need
-            smart_context = self._detect_smart_context(msg_lower)
-            if smart_context:
-                return await self._handle_smart_context(message, smart_context, today_str)
-
-            # ── 2. Routine / day structure messages ───────────────────────────
-            _routine_phrases = [
-                "i have college", "i have school", "i have work", "i have class",
-                "my college is", "my school is", "my work is",
-                "i wake up", "i sleep at", "i finish at", "i get home",
-                "my lunch", "my dinner", "my break",
-                "my day starts", "my day ends", "i'm free from", "i am free from",
-                "blocked from", "busy from", "not available",
-                "tell you my routine", "my routine is",
-                "i study from", "i work from",
-                "plan around it", "plan around my", "schedule around",
-            ]
-            if any(p in msg_lower for p in _routine_phrases):
-                return await self._parse_and_save_routine(message)
-
-            # ── 3. SmartBrain pre-processing (greetings, pure chat) ───────────
-            if self.brain:
-                brain_result = await self.brain.pre_process(message, has_schedule)
-                if brain_result["action"] == "respond":
-                    return brain_result["response"]
-
-            # ── 4. Route by intent ────────────────────────────────────────────
-            intent = await self._detect_intent(message)
-            logger.info(f"Detected intent: {intent} for message: '{message[:60]}'")
-
-            if intent == IntentType.ADD_TASK:
-                return await self._handle_add_task(message)
-            if intent == IntentType.MODIFY_SCHEDULE:
-                return await self._parse_and_save_routine(message)
-            if intent == IntentType.CREATE_SCHEDULE:
-                # ✅ FIX: pass history so scheduler understands multi-turn context
-                return await self._create_schedule_with_nlp(
-                    message, conversation_history=self._conversation_history
-                )
-
-            # All other intents → enhanced rule-based
-            return await self._enhanced_rule_based_processing(message)
-
-        except Exception as e:
-            logger.error(f"process_message error: {e}", exc_info=True)
+        # Per-user cooldown to prevent rapid double-sends
+        now = _time.time()
+        last = _user_last_request.get(self.user_id, 0)
+        if now - last < _USER_COOLDOWN_SECONDS:
             return {
-                "type":    "chat",
-                # ✅ FIX: clearer error — doesn't blame the user
-                "message": "Something went wrong on my end. Please try again!",
-                "suggestions": [
-                    "Study Physics 2 hours and Maths 1 hour",
-                    "Add meditation for 30 minutes",
-                    "Give me productivity tips",
-                ],
+                "type": "chat",
+                "message": "Please wait a moment before sending another message.",
+                "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
             }
+        _user_last_request[self.user_id] = now
+
+        # Hand off entirely to the Intelligent Chat Engine
+        engine = IntelligentChatEngine(self.user_id, self.db)
+        return await engine.chat(message, conversation_history or [])
 
     def _detect_smart_context(self, msg: str) -> Optional[str]:
         """
