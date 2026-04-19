@@ -1302,7 +1302,7 @@ async def train_ai_model(current_user=Depends(get_current_user)):
         success = await learner.train_model()
         if success:
             return {"success": True, "message": "🎉 Model trained! AI predictions are now personalised to you."}
-        return {"success": False, "message": "📊 Need at least 10 completed tasks to train. Keep tracking!"}
+        return {"success": False, "message": "📊 Need at least 30 completed tasks to train. Keep tracking!"}
     except Exception as e:
         logger.error(f"Train model error: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
