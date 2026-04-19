@@ -2,135 +2,74 @@ import { Link } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { motion, useScroll, useTransform, useSpring, AnimatePresence } from "framer-motion";
 import { 
-  CheckSquare, Calendar, Clock, Brain, TrendingUp, ArrowRight, 
-  Sparkles, Star, Zap, Target, Award, BarChart3, Users, 
-  Rocket, ChevronRight, Play, Circle, 
-  CheckCircle2, Moon, Sun, Cloud, Heart, Coffee, Gift,
-  Layout, PieChart, Activity, Settings
+  Brain, TrendingUp, ArrowRight, 
+  Sparkles, Clock,
+  Layout, BarChart3,
 } from "lucide-react";
 import BackgroundLayout from "../components/BackgroundLayout";
 
 export const Landing = () => {
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-  const [isHovered, setIsHovered] = useState(false);
-  const [counters, setCounters] = useState({ satisfaction: 0, availability: 0 });
-  const [isVisible, setIsVisible] = useState(false);
-  const statsRef = useRef(null);
-  
+  const [wordIndex, setWordIndex] = useState(0);
   const { scrollYProgress } = useScroll();
   const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30 });
-
-  // Parallax values
   const y1 = useTransform(scrollYProgress, [0, 1], [0, -200]);
   const y2 = useTransform(scrollYProgress, [0, 1], [0, 300]);
-  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0.3]);
 
-  // Mouse move effect for hero
+  const rotatingWords = ["students.", "developers.", "founders.", "you."];
+
+  // Typewriter word rotation
   useEffect(() => {
-    const handleMouseMove = (e) => {
-      setMousePosition({ x: e.clientX, y: e.clientY });
-    };
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    const interval = setInterval(() => {
+      setWordIndex(prev => (prev + 1) % rotatingWords.length);
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Intersection Observer for stats counter
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-        }
-      },
-      { threshold: 0.5 }
-    );
-    
-    if (statsRef.current) {
-      observer.observe(statsRef.current);
-    }
-    
-    return () => {
-      if (statsRef.current) {
-        observer.unobserve(statsRef.current);
-      }
-    };
-  }, []);
-
-  // Animate counters
-  useEffect(() => {
-    if (isVisible) {
-      const duration = 2000;
-      const interval = 20;
-      const steps = duration / interval;
-      let step = 0;
-      
-      const timer = setInterval(() => {
-        step++;
-        const progress = step / steps;
-        setCounters({
-          satisfaction: Math.min(Math.floor(95 * progress), 95),
-          availability: Math.min(Math.floor(24 * progress), 24)
-        });
-        
-        if (step >= steps) {
-          clearInterval(timer);
-        }
-      }, interval);
-      
-      return () => clearInterval(timer);
-    }
-  }, [isVisible]);
-
-  // Updated features - Time Blocks as main feature
   const features = [
     {
       icon: Layout,
       title: "Time Blocks",
-      description: "Visual time-blocking for your day. Morning, afternoon, evening made simple and structured.",
+      description: "Plan your whole week in minutes. See every task laid out by day so nothing slips through the cracks.",
       color: "from-indigo-500 to-blue-600",
-      link: "/planner",
-      image: "https://images.unsplash.com/photo-1758691736804-4e88c52ad58b?w=800&q=80",
-      gradient: "from-indigo-500/20 to-blue-600/20",
+      link: "/tasks",
+      image: "https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&q=80",
       delay: 0,
       badge: "New",
     },
     {
       icon: Clock,
       title: "Deep Work",
-      description: "Pomodoro timer with focus analytics. Stay in flow, track sessions, and boost concentration.",
+      description: "Pomodoro timer with ambient sounds — Ocean, Forest, Fireplace. Stay in flow and track every focus session.",
       color: "from-purple-500 to-pink-600",
       link: "/focus",
-      image: "https://images.unsplash.com/photo-1690106505816-6ba357b09c45?w=800&q=80",
-      gradient: "from-purple-500/20 to-pink-600/20",
+      image: "https://images.unsplash.com/photo-1528716321680-815a8cdb8cbe?w=800&q=80",
       delay: 0.1,
       badge: "Hot",
     },
     {
       icon: Brain,
       title: "AI Scheduler",
-      description: "AI-powered schedule optimization. Get intelligent recommendations based on your habits and energy patterns.",
+      description: "Type what you need to do. The AI finds the best time based on your personal energy patterns — automatically.",
       color: "from-violet-600 to-indigo-700",
       link: "/ai-planner",
-      image: "https://images.unsplash.com/photo-1760278041709-e54cb1dca123?w=800&q=80",
-      gradient: "from-violet-600/20 to-indigo-700/20",
+      image: "https://images.unsplash.com/photo-1531746790731-6c087fecd65a?w=800&q=80",
       delay: 0.2,
       badge: "AI Powered",
     },
     {
       icon: BarChart3,
       title: "Analytics Hub",
-      description: "Deep insights into your productivity patterns. Track streaks, focus scores, and growth trends.",
+      description: "See your streaks, focus scores, and peak productivity hours. Know exactly when and how you work best.",
       color: "from-emerald-500 to-teal-600",
       link: "/analytics",
-      image: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&q=80",
-      gradient: "from-emerald-500/20 to-teal-600/20",
+      image: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&q=80",
       delay: 0.3,
       badge: "Insights",
     },
   ];
 
-  // Floating particles for hero
-  const particles = Array.from({ length: 20 }, (_, i) => ({
+  // Reduced to 6 particles (was 20 — too heavy on mobile)
+  const particles = Array.from({ length: 6 }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     y: Math.random() * 100,
@@ -141,16 +80,16 @@ export const Landing = () => {
 
   return (
     <>
-      {/* Progress bar */}
+      {/* Scroll progress bar */}
       <motion.div
         className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 to-indigo-500 z-50 origin-left"
         style={{ scaleX }}
       />
 
       <BackgroundLayout>
-        {/* Hero Section */}
-        <section className="relative pt-20 pb-32 px-6 md:px-12 lg:px-24 overflow-hidden">
-          {/* Animated Gradient Background */}
+        {/* ── Hero ── */}
+        <section className="relative pt-20 pb-24 px-6 md:px-12 lg:px-24 overflow-hidden">
+          {/* Animated gradient blob */}
           <motion.div
             className="absolute inset-0 -z-10"
             animate={{
@@ -163,7 +102,7 @@ export const Landing = () => {
             transition={{ duration: 8, repeat: Infinity, repeatType: "reverse" }}
           />
 
-          {/* Floating Particles */}
+          {/* Floating particles (6 only) */}
           <div className="absolute inset-0 -z-10 overflow-hidden">
             {particles.map((particle) => (
               <motion.div
@@ -175,42 +114,23 @@ export const Landing = () => {
                   width: particle.size,
                   height: particle.size,
                 }}
-                animate={{
-                  y: [0, -30, 0],
-                  x: [0, 20, -20, 0],
-                  opacity: [0, 0.5, 0],
-                }}
-                transition={{
-                  duration: particle.duration,
-                  repeat: Infinity,
-                  delay: particle.delay,
-                  ease: "easeInOut",
-                }}
+                animate={{ y: [0, -30, 0], x: [0, 20, -20, 0], opacity: [0, 0.5, 0] }}
+                transition={{ duration: particle.duration, repeat: Infinity, delay: particle.delay, ease: "easeInOut" }}
               />
             ))}
           </div>
 
-          {/* Floating 3D Elements */}
-          <motion.div
-            className="absolute top-20 left-10 hidden lg:block"
-            style={{ y: y1 }}
-            animate={{ rotate: 360 }}
-            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-          >
+          {/* Floating blobs */}
+          <motion.div className="absolute top-20 left-10 hidden lg:block" style={{ y: y1 }}>
             <div className="w-32 h-32 bg-gradient-to-r from-violet-500/20 to-purple-500/20 rounded-full blur-2xl" />
           </motion.div>
-          
-          <motion.div
-            className="absolute bottom-20 right-10 hidden lg:block"
-            style={{ y: y2 }}
-            animate={{ rotate: -360 }}
-            transition={{ duration: 25, repeat: Infinity, ease: "linear" }}
-          >
+          <motion.div className="absolute bottom-20 right-10 hidden lg:block" style={{ y: y2 }}>
             <div className="w-40 h-40 bg-gradient-to-r from-indigo-500/20 to-blue-500/20 rounded-full blur-2xl" />
           </motion.div>
 
           <div className="max-w-7xl mx-auto text-center relative z-10">
-            {/* Animated Badge */}
+
+            {/* Badge */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -222,24 +142,19 @@ export const Landing = () => {
                 className="px-4 py-2 bg-white/80 backdrop-blur-sm border border-violet-200 rounded-full text-violet-700 text-sm font-medium shadow-lg"
               >
                 <Sparkles className="inline w-4 h-4 mr-2" />
-                Your productivity companion
+                Now in beta — free for everyone
               </motion.div>
             </motion.div>
 
-            {/* Main Title with Animation */}
+            {/* Main headline */}
             <motion.h1
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.2 }}
-              className="text-5xl md:text-7xl font-bold text-slate-900 mb-6 leading-tight"
+              className="text-5xl md:text-7xl font-bold text-slate-900 mb-4 leading-tight"
             >
-              Master Your Time,{" "}
+              Your AI planner that{" "}
               <motion.span
-                className="text-violet-600 inline-block"
-                animate={{
-                  backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
-                }}
-                transition={{ duration: 5, repeat: Infinity }}
                 style={{
                   background: "linear-gradient(135deg, #8b5cf6, #6366f1, #8b5cf6)",
                   backgroundSize: "200% auto",
@@ -247,115 +162,100 @@ export const Landing = () => {
                   backgroundClip: "text",
                   color: "transparent",
                 }}
+                animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
+                transition={{ duration: 5, repeat: Infinity }}
               >
-                Multiply Your Results
+                thinks for you
               </motion.span>
             </motion.h1>
+
+            {/* Subheadline with typewriter */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.35 }}
+              className="text-xl md:text-2xl text-slate-600 mb-3 font-medium"
+            >
+              Built for{" "}
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={wordIndex}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="text-violet-600 font-semibold"
+                >
+                  {rotatingWords[wordIndex]}
+                </motion.span>
+              </AnimatePresence>
+            </motion.div>
 
             {/* Description */}
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              className="text-lg md:text-xl text-slate-700 mb-10 max-w-4xl mx-auto"
+              transition={{ duration: 0.6, delay: 0.45 }}
+              className="text-base md:text-lg text-slate-500 mb-10 max-w-2xl mx-auto"
             >
-              A beautifully designed productivity suite that helps you plan, focus, and achieve more.
+              No manual planning. No guesswork. Timevora learns when your brain works best and schedules your tasks automatically — getting smarter every day.
             </motion.p>
 
-            {/* Buttons */}
+            {/* CTA Buttons */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.6 }}
               className="flex flex-col sm:flex-row gap-4 justify-center"
             >
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
+              {/* Primary CTA with shimmer */}
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Link
-                  to="/planner"
-                  className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-full font-semibold shadow-lg hover:shadow-xl transition-all"
+                  to="/signup"
+                  className="relative overflow-hidden inline-flex items-center gap-2 px-8 py-4 bg-violet-600 text-white rounded-full font-semibold shadow-lg shadow-violet-500/30 hover:bg-violet-700 transition-colors group"
                 >
+                  {/* Shimmer sweep on hover */}
+                  <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:translate-x-full transition-transform duration-700" />
                   Get Started Free <ArrowRight size={20} />
                 </Link>
               </motion.div>
 
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Link
-                  to="/ai-planner"
-                  className="inline-flex items-center gap-2 px-8 py-4 bg-white/80 backdrop-blur border border-gray-200 rounded-full font-semibold hover:bg-white hover:shadow-lg transition-all"
+              {/* Secondary CTA */}
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                <a
+                  href="#features"
+                  className="inline-flex items-center gap-2 px-8 py-4 bg-white/80 backdrop-blur border border-gray-200 rounded-full font-semibold hover:bg-white hover:shadow-lg transition-all text-slate-700"
                 >
-                  Analyze My Productivity <Brain size={20} />
-                </Link>
+                  See how it works →
+                </a>
               </motion.div>
             </motion.div>
 
-            {/* Hint Link */}
+            {/* Trust pills — honest, no fake stats */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
+              transition={{ delay: 0.9 }}
+              className="flex flex-wrap justify-center gap-3 mt-10"
             >
-              <Link
-                to="/planner"
-                className="block mt-12 text-sm text-slate-700 hover:text-violet-600 transition-colors"
-              >
-                Start by organizing your day with Time Blocks →
-              </Link>
-            </motion.div>
-
-            {/* Stats with Animation */}
-            <motion.div
-              ref={statsRef}
-              initial={{ opacity: 0, y: 30 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1, duration: 0.6 }}
-              className="grid grid-cols-2 gap-10 mt-24 max-w-md mx-auto"
-            >
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                className="relative"
-              >
-                <div className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                  {counters.satisfaction}%
-                </div>
-                <div className="text-sm text-slate-600 mt-1">Satisfaction Rate</div>
-                <motion.div
-                  className="absolute -top-2 -right-2"
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 2, repeat: Infinity }}
+              {[
+                "✓ Free during beta",
+                "✓ You’re good, no charge until you love it",
+                "✓ Built by a student, for students",
+              ].map((pill) => (
+                <span
+                  key={pill}
+                  className="px-4 py-1.5 bg-white/70 backdrop-blur border border-violet-100 rounded-full text-sm text-slate-600 font-medium"
                 >
-                  <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
-                </motion.div>
-              </motion.div>
-              
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                className="relative"
-              >
-                <div className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-                  {counters.availability}/7
-                </div>
-                <div className="text-sm text-slate-600 mt-1">Always Available</div>
-                <motion.div
-                  className="absolute -top-2 -right-2"
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 3, repeat: Infinity }}
-                >
-                  <Circle className="w-3 h-3 text-green-400 fill-green-400" />
-                </motion.div>
-              </motion.div>
+                  {pill}
+                </span>
+              ))}
             </motion.div>
           </div>
         </section>
 
-        {/* Features Section - Now only 4 cards */}
-        <section className="py-20 px-6 md:px-12 lg:px-24 relative overflow-hidden">
-          {/* Background Pattern */}
+        {/* ── Features ── */}
+        <section id="features" className="py-20 px-6 md:px-12 lg:px-24 relative overflow-hidden">
           <div className="absolute inset-0 opacity-5">
             <div className="absolute top-0 left-0 w-96 h-96 bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full blur-3xl" />
             <div className="absolute bottom-0 right-0 w-96 h-96 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full blur-3xl" />
@@ -370,11 +270,11 @@ export const Landing = () => {
               className="text-center mb-12"
             >
               <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-                Everything You Need to Stay{" "}
-                <span className="text-violet-600">Productive</span>
+                Everything you need to stay{" "}
+                <span className="text-violet-600">productive</span>
               </h2>
               <p className="text-slate-600 max-w-2xl mx-auto">
-                Powerful tools designed to help you focus, organize, and achieve your goals.
+                Four powerful tools, one place. Designed around how your brain actually works.
               </p>
             </motion.div>
 
@@ -390,27 +290,27 @@ export const Landing = () => {
                     transition={{ delay: feature.delay, duration: 0.6 }}
                     whileHover={{ y: -8, transition: { duration: 0.3 } }}
                   >
-                    <Link
-                      to={feature.link}
-                      className="block group relative overflow-hidden"
-                    >
+                    <Link to={feature.link} className="block group relative overflow-hidden">
                       <div className="relative rounded-2xl overflow-hidden shadow-lg transition-all duration-500 group-hover:shadow-2xl">
-                        <div className="relative h-64">
-                          <motion.img
+                        <div className="relative h-64 bg-slate-100">
+                          <img
                             src={feature.image}
                             className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                            alt=""
+                            alt={feature.title}
+                            onError={(e) => {
+                              // Fallback gradient if screenshot not yet added
+                              e.target.style.display = "none";
+                              e.target.parentNode.style.background = `linear-gradient(135deg, #8b5cf6, #6366f1)`;
+                            }}
                           />
                           <div className={`absolute inset-0 bg-gradient-to-t ${feature.color} opacity-70`} />
-                          
-                          {/* Badge */}
+
                           {feature.badge && (
                             <div className="absolute top-4 right-4 bg-white/90 backdrop-blur rounded-full px-2 py-1 text-xs font-semibold text-violet-600 shadow-md">
                               {feature.badge}
                             </div>
                           )}
-                          
-                          {/* Icon with Pulse Effect */}
+
                           <motion.div
                             className="absolute bottom-4 left-4 bg-white/30 backdrop-blur rounded-xl p-3"
                             whileHover={{ scale: 1.1 }}
@@ -419,8 +319,8 @@ export const Landing = () => {
                           >
                             <Icon className="text-white w-6 h-6" />
                           </motion.div>
-                          
-                          {/* Glow Effect */}
+
+                          {/* Shimmer sweep */}
                           <motion.div
                             className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0"
                             animate={{ x: ["-100%", "200%"] }}
@@ -432,9 +332,7 @@ export const Landing = () => {
                           <h3 className="text-2xl font-semibold mb-2 group-hover:text-violet-600 transition-colors">
                             {feature.title}
                           </h3>
-                          <p className="text-slate-600 mb-4">
-                            {feature.description}
-                          </p>
+                          <p className="text-slate-600 mb-4">{feature.description}</p>
                           <motion.span
                             className="inline-flex items-center gap-1 text-violet-600 font-medium group-hover:gap-2 transition-all"
                             whileHover={{ x: 5 }}
@@ -451,7 +349,7 @@ export const Landing = () => {
           </div>
         </section>
 
-        {/* Benefits Section */}
+        {/* ── Bottom CTA — honest version ── */}
         <section className="py-20 px-6 md:px-12 lg:px-24">
           <div className="max-w-5xl mx-auto">
             <motion.div
@@ -462,7 +360,7 @@ export const Landing = () => {
               whileHover={{ scale: 1.02 }}
               className="relative bg-gradient-to-r from-violet-600 via-violet-700 to-indigo-700 text-white rounded-3xl p-16 text-center overflow-hidden"
             >
-              {/* Animated Background */}
+              {/* Animated background */}
               <motion.div
                 className="absolute inset-0"
                 animate={{
@@ -474,42 +372,41 @@ export const Landing = () => {
                 }}
                 transition={{ duration: 5, repeat: Infinity, repeatType: "reverse" }}
               />
-              
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
                 className="absolute top-10 right-10 w-20 h-20 bg-white/10 rounded-full blur-xl"
               />
-              
               <motion.div
                 animate={{ rotate: -360 }}
                 transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
                 className="absolute bottom-10 left-10 w-32 h-32 bg-white/10 rounded-full blur-xl"
               />
-              
+
               <motion.div
                 animate={{ y: [0, -10, 0] }}
                 transition={{ duration: 3, repeat: Infinity }}
+                className="text-5xl mb-6"
               >
-                <TrendingUp size={48} className="mx-auto mb-6" />
+                🧠
               </motion.div>
-              
-              <h2 className="text-4xl font-bold mb-6">
-                Boost Your Productivity by 3x
+
+              <h2 className="text-4xl font-bold mb-4">
+                Built during first year of college.
               </h2>
-              <p className="text-violet-100 mb-8">
-                Join thousands improving their workflow with Timevora.
+              <p className="text-violet-100 mb-2 text-lg">
+                Tested by real students. Free to try — always.
               </p>
-              
-              <motion.div
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
+              <p className="text-violet-200 mb-8 text-sm">
+                No fake stats. No inflated numbers. Just a tool that actually works.
+              </p>
+
+              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Link
-                  to="/planner"
+                  to="/signup"
                   className="inline-flex items-center gap-2 bg-white text-violet-600 px-8 py-4 rounded-full font-semibold hover:shadow-xl transition-all"
                 >
-                  Start Your Journey <ArrowRight size={20} />
+                  Start free  <ArrowRight size={20} />
                 </Link>
               </motion.div>
             </motion.div>
@@ -517,7 +414,7 @@ export const Landing = () => {
         </section>
       </BackgroundLayout>
 
-      {/* Footer - Single footer only */}
+      {/* ── Footer ── */}
       <motion.footer
         initial={{ opacity: 0 }}
         whileInView={{ opacity: 1 }}
@@ -525,18 +422,17 @@ export const Landing = () => {
         transition={{ duration: 0.6 }}
         className="py-12 bg-slate-50 border-t text-center relative overflow-hidden"
       >
-        {/* Animated Border */}
         <motion.div
           className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500 to-transparent"
           animate={{ x: ["-100%", "100%"] }}
           transition={{ duration: 3, repeat: Infinity, repeatDelay: 2 }}
         />
-        
-        <div className="flex justify-center items-center gap-2 mb-4">
+
+        <div className="flex justify-center items-center gap-2 mb-3">
           <motion.div
             whileHover={{ rotate: 360 }}
             transition={{ duration: 0.5 }}
-            className="w-8 h-8 bg-gradient-to-r from-violet-600 to-indigo-600 rounded-lg text-white flex items-center justify-center font-bold"
+            className="w-8 h-8 bg-gradient-to-r from-violet-600 to-indigo-600 rounded-lg text-white flex items-center justify-center font-bold text-sm"
           >
             Tv
           </motion.div>
@@ -544,14 +440,20 @@ export const Landing = () => {
             Timevora
           </span>
         </div>
-        <p className="text-slate-500 text-sm">
-          © 2026 Timevora. Built with <motion.span
+
+        <p className="text-slate-400 text-sm mb-1">
+          © 2026 Timevora. Built with{" "}
+          <motion.span
             animate={{ scale: [1, 1.2, 1] }}
             transition={{ duration: 1, repeat: Infinity }}
             className="inline-block"
           >
             ❤️
-          </motion.span> for productivity.
+          </motion.span>{" "}
+          for productivity.
+        </p>
+        <p className="text-slate-400 text-xs">
+          Made by a first-year BTech student · Free during beta
         </p>
       </motion.footer>
     </>
