@@ -32,40 +32,33 @@ export const Navigation = () => {
     };
 
     handleFullscreenChange();
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
 
     return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
-      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
     };
   }, []);
 
   const navItems = [
-    { path: "/",           label: "Home",        icon: Home          },
+    { path: "/",           label: "Home",        icon: Home           },
     { path: "/tasks",      label: "Planner",     icon: LayoutDashboard },
-    { path: "/focus",      label: "Focus",       icon: Clock         },
-    { path: "/ai-planner", label: "AI Planner",  icon: Bot           },
-    { path: "/analytics",  label: "Performance", icon: BarChart3     },
+    { path: "/focus",      label: "Focus",       icon: Clock          },
+    { path: "/ai-planner", label: "AI Planner",  icon: Bot            },
+    { path: "/analytics",  label: "Performance", icon: BarChart3      },
   ];
 
-  // ── FIX: also match legacy/redirect paths so highlight works correctly ──
   const isActive = (path) => {
     const current = location.pathname;
     if (current === path) return true;
-
-    // Planner aliases
     if (path === "/tasks" && ["/unified-planner", "/planner", "/dashboard", "/todo"].includes(current)) return true;
-    // Performance aliases
     if (path === "/analytics" && ["/performance"].includes(current)) return true;
-    // AI Planner aliases
     if (path === "/ai-planner" && ["/analyzer"].includes(current)) return true;
-
     return false;
   };
 
@@ -79,9 +72,7 @@ export const Navigation = () => {
     navigate(path);
   };
 
-  if (isFullscreen) {
-    return <div className="h-0" />;
-  }
+  if (isFullscreen) return <div className="h-0" />;
 
   return (
     <>
@@ -89,25 +80,29 @@ export const Navigation = () => {
       <nav className="hidden md:flex fixed top-0 left-0 right-0 bg-white/80 backdrop-blur-md border-b border-slate-100 z-50">
         <div className="max-w-7xl mx-auto px-6 lg:px-12 w-full flex items-center justify-between h-16">
 
-          {/* Logo */}
+          {/* Logo + Beta badge */}
           <Link to="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-sm">Tv</span>
             </div>
             <span className="text-xl font-bold text-slate-900">Timevora</span>
+            {/* Beta badge */}
+            <span className="ml-1 px-2 py-0.5 bg-violet-100 text-violet-700 text-xs font-semibold rounded-full">
+              Beta
+            </span>
           </Link>
 
-          {/* Right Side */}
+          {/* Right side */}
           {!token ? (
             <div className="flex items-center gap-4">
-              <Link to="/login" className="text-slate-600 hover:text-violet-600 font-medium">
+              <Link to="/login" className="text-slate-600 hover:text-violet-600 font-medium transition">
                 Login
               </Link>
               <Link
                 to="/signup"
                 className="bg-violet-600 text-white px-4 py-2 rounded-full font-medium hover:bg-violet-700 transition"
               >
-                Sign up
+                Sign up free
               </Link>
             </div>
           ) : (
@@ -130,14 +125,12 @@ export const Navigation = () => {
                       {item.label === "Performance" ? "Stats" :
                        item.label === "AI Planner" ? "AI" :
                        item.label === "Planner" ? "Plan" :
-                       item.label === "Focus" ? "Focus" :
                        item.label}
                     </span>
                   </Link>
                 );
               })}
 
-              {/* Logout */}
               <button
                 onClick={handleLogout}
                 className="ml-2 px-3 py-1.5 text-sm rounded-full text-red-500 hover:bg-red-50 transition font-medium flex items-center gap-1"
@@ -153,12 +146,14 @@ export const Navigation = () => {
       {/* Mobile Navbar */}
       <nav className="md:hidden fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md border-b border-slate-100 z-50">
         <div className="px-4 flex items-center justify-between h-16">
-
           <Link to="/" className="flex items-center gap-2">
             <div className="w-8 h-8 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-lg flex items-center justify-center">
               <span className="text-white font-bold text-sm">Tv</span>
             </div>
             <span className="text-lg font-bold text-slate-900">Timevora</span>
+            <span className="ml-1 px-2 py-0.5 bg-violet-100 text-violet-700 text-xs font-semibold rounded-full">
+              Beta
+            </span>
           </Link>
 
           {token && (
