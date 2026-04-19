@@ -175,6 +175,7 @@ class IntelligentChatEngine:
             return self._error_response()
 
     def _parse_json(self, raw: str) -> Dict[str, Any]:
+        # Step 1: strip markdown code fences
         if "```" in raw:
             parts = raw.split("```")
             for part in parts:
@@ -185,21 +186,29 @@ class IntelligentChatEngine:
                     raw = part
                     break
 
+        # Step 2: extract first complete JSON object
         raw   = raw.strip()
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         if start != -1 and end > start:
             raw = raw[start:end]
 
+        # Step 3: try to parse
         try:
             result = json.loads(raw)
         except json.JSONDecodeError as je:
             logger.warning(f"JSON parse failed: {je} | raw: {raw[:300]}")
+            # NEVER put raw JSON into message — return a clean fallback
             return {
                 "type":        "chat",
-                "message":     raw[:400] if len(raw) > 10 else "I'm here to help! What would you like to plan?",
+                "message":     "I\'m here to help! What would you like to plan today?",
                 "suggestions": ["Plan my day", "Give me advice", "Show my progress"],
             }
+
+        # Step 4: if message field itself looks like raw JSON, replace it
+        msg = result.get("message", "")
+        if msg and (msg.strip().startswith("{") or msg.strip().startswith("[") or '"\'type\'"' in msg):
+            result["message"] = "I\'ve processed your request!"
 
         result.setdefault("type",        "chat")
         result.setdefault("message",     "Here to help!")
@@ -287,10 +296,23 @@ class IntelligentChatEngine:
 
         if ctx["saved_routine"]:
             r = ctx["saved_routine"]
-            lines.append(
-                f"Saved routine: free from {r['free_from']} to {r['free_until']}. "
-                "Use this window when scheduling unless user specifies otherwise."
-            )
+            routine_start = r.get("routine_start") or r.get("college_start") or r.get("work_start")
+            routine_end   = r.get("routine_end")   or r.get("college_end")   or r.get("work_end")
+            routine_label = r.get("label", "college/work")
+            free_from     = r.get("free_from")
+            free_until    = r.get("free_until")
+
+            routine_desc = f"User's daily routine: free window is {free_from} to {free_until}."
+            if routine_start and routine_end:
+                routine_desc += (
+                    f" Their {routine_label} runs from {routine_start} to {routine_end}. "
+                    f"IMPORTANT: 'before college/work' means BEFORE {routine_start}. "
+                    f"'after college/work' means AFTER {routine_end}. "
+                    "Always respect these boundaries when scheduling."
+                )
+            else:
+                routine_desc += " Use this window when scheduling unless user specifies otherwise."
+            lines.append(routine_desc)
         else:
             lines.append(
                 "Saved routine: none — if user gives tasks without a time window, "
