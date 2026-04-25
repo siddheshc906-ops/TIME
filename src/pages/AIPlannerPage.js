@@ -54,7 +54,8 @@ function normaliseItem(item, index) {
 
   return {
     ...item,
-    task:        item.task || item.name || "Unnamed task",
+    task:           item.task || item.name || "Unnamed task",
+    schedule_reason: item.schedule_reason || "",
     timeDisplay,
     duration:    item.duration ?? 1,
     priority:    item.priority ?? "medium",
@@ -323,7 +324,35 @@ export default function AIPlannerPage() {
     return `${hour}:${String(m).padStart(2, "0")} ${period}`;
   };
 
+  // Convert "HH:MM" to decimal hour (e.g. "09:30" -> 9.5)
+  const toDecimal = (hhmm) => {
+    if (!hhmm) return null;
+    const [h, m] = hhmm.split(":").map(Number);
+    return h + m / 60;
+  };
+
   const saveRoutine = async () => {
+    // ── Validate: wake time must be BEFORE college start ──────────────────
+    if (routine.hasBusy && routine.wakeTime && routine.busyStart) {
+      const wakeDecimal  = toDecimal(routine.wakeTime);
+      const busyDecimal  = toDecimal(routine.busyStart);
+      if (wakeDecimal >= busyDecimal) {
+        toast && toast.error
+          ? toast.error(`Wake time (${to12h(routine.wakeTime)}) must be before ${routine.busyLabel || "college"} start (${to12h(routine.busyStart)}). Please fix this.`)
+          : alert(`Wake time must be before ${routine.busyLabel || "college"} start time. Please fix this.`);
+        return;
+      }
+    }
+    // ── Validate: college end must be before sleep time ───────────────────
+    if (routine.hasBusy && routine.busyEnd && routine.sleepTime) {
+      if (toDecimal(routine.busyEnd) >= toDecimal(routine.sleepTime)) {
+        toast && toast.error
+          ? toast.error(`${routine.busyLabel || "College"} end time must be before sleep time.`)
+          : alert(`${routine.busyLabel || "College"} end time must be before sleep time.`);
+        return;
+      }
+    }
+
     setRoutineSaving(true);
     try {
       localStorage.setItem("user-routine", JSON.stringify(routine));
@@ -333,6 +362,29 @@ export default function AIPlannerPage() {
       const sleepStr   = to12h(routine.sleepTime);
       const busyStart  = to12h(routine.busyStart);
       const busyEnd    = to12h(routine.busyEnd);
+
+      // ── Save to /api/day-context so backend AI knows college hours ──
+      await fetch(`${API}/api/day-context`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          wake_up:       toDecimal(routine.wakeTime),
+          day_start:     routine.hasBusy ? toDecimal(routine.busyStart) : toDecimal(routine.wakeTime),
+          day_end:       toDecimal(routine.sleepTime),
+          lunch_start:   13.0,
+          lunch_end:     14.0,
+          dinner_start:  19.0,
+          college_start: routine.hasBusy ? toDecimal(routine.busyStart) : null,
+          college_end:   routine.hasBusy ? toDecimal(routine.busyEnd)   : null,
+          college_label: routine.hasBusy ? (routine.busyLabel || "college") : null,
+          blocked_slots: routine.hasBusy ? [{
+            start: toDecimal(routine.busyStart),
+            end:   toDecimal(routine.busyEnd),
+            label: routine.busyLabel || "college",
+          }] : [],
+        }),
+      });
+
       const message = routine.hasBusy
         ? `I wake up at ${wakeStr}. I have ${busyLabel} from ${busyStart} to ${busyEnd}. I sleep at ${sleepStr}. I am a ${occupationLabels[routine.occupation] || routine.occupation}.`
         : `I wake up at ${wakeStr}. I sleep at ${sleepStr}. I am a ${occupationLabels[routine.occupation] || routine.occupation}. I am free all day.`;
@@ -1458,12 +1510,26 @@ export default function AIPlannerPage() {
                 )}
               </div>
 
+              {/* Conflict warning — shown live when wake >= college start */}
+              {routine.hasBusy && routine.wakeTime && routine.busyStart && toDecimal(routine.wakeTime) >= toDecimal(routine.busyStart) && (
+                <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-700 flex items-start gap-2">
+                  <span className="text-base leading-none">⚠️</span>
+                  <span>
+                    <span className="font-semibold">Time conflict: </span>
+                    Your wake time ({to12h(routine.wakeTime)}) is at or after {routine.busyLabel || "college"} start ({to12h(routine.busyStart)}).
+                    The AI won't be able to schedule tasks "before {routine.busyLabel || "college"}". Please set wake time earlier.
+                  </span>
+                </div>
+              )}
+
               {/* Preview */}
-              <div className="bg-violet-50 rounded-xl p-3 text-xs text-violet-700">
-                <span className="font-semibold">AI will schedule tasks: </span>
-                {routine.wakeTime} – {routine.hasBusy ? `${routine.busyStart} (before ${routine.busyLabel || "busy"})` : routine.sleepTime}
-                {routine.hasBusy && ` and ${routine.busyEnd} – ${routine.sleepTime} (after ${routine.busyLabel || "busy"})`}
-              </div>
+              {!(routine.hasBusy && routine.wakeTime && routine.busyStart && toDecimal(routine.wakeTime) >= toDecimal(routine.busyStart)) && (
+                <div className="bg-violet-50 rounded-xl p-3 text-xs text-violet-700">
+                  <span className="font-semibold">AI will schedule tasks: </span>
+                  {routine.wakeTime} – {routine.hasBusy ? `${routine.busyStart} (before ${routine.busyLabel || "busy"})` : routine.sleepTime}
+                  {routine.hasBusy && ` and ${routine.busyEnd} – ${routine.sleepTime} (after ${routine.busyLabel || "busy"})`}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-2 mt-6">
@@ -2009,6 +2075,16 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
             </span>
           )}
         </div>
+
+        {/* ── Schedule reason — why AI picked this time ── */}
+        {item.schedule_reason && !item.isBreak && (
+          <div className="mt-2 ml-6 flex items-start gap-1.5">
+            <span className="text-violet-400 text-[10px] mt-0.5 flex-shrink-0">✦</span>
+            <p className="text-[11px] text-violet-500 leading-snug italic">
+              {item.schedule_reason}
+            </p>
+          </div>
+        )}
       </div>
     </motion.div>
   );
