@@ -812,19 +812,63 @@ export default function PerformancePage() {
                 </ResponsiveContainer>
               </div>
             )}
-            {chronotype && chronotype.ready !== false && taskCount >= 5 && (
-              <div style={{ marginTop: 20, borderRadius: 12, padding: "16px 20px", background: "#f0f9ff", border: "1px solid #bae6fd", display: "flex", alignItems: "center", gap: 14 }}>
-                <span style={{ fontSize: 26 }}>{chronotype.emoji || "🧠"}</span>
-                <div style={{ flex: 1 }}>
-                  <p style={{ fontWeight: 700, color: "#0f172a", fontSize: 14 }}>Chronotype: {chronotype.type || "Analyzing…"}</p>
-                  <p style={{ color: "#6b7280", fontSize: 12, marginTop: 2 }}>{chronotype.description || "Model is learning your energy pattern."}</p>
+            {/* ── Chronotype Card — prominent, personalised ── */}
+            {chronotype && chronotype.ready !== false && taskCount >= 5 ? (
+              <div style={{
+                marginTop: 20,
+                borderRadius: 16,
+                overflow: "hidden",
+                border: "1px solid #e0e7ff",
+                boxShadow: "0 4px 24px rgba(99,102,241,0.08)",
+              }}>
+                {/* Header strip */}
+                <div style={{
+                  background: "linear-gradient(135deg, #4f46e5, #7c3aed)",
+                  padding: "14px 20px",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <span style={{ fontSize: 32 }}>{chronotype.emoji || "🧠"}</span>
+                  <div>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>
+                      Your Chronotype
+                    </p>
+                    <p style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>
+                      {chronotype.type || "Analyzing…"}
+                    </p>
+                  </div>
+                  <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginBottom: 3 }}>Peak window</p>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "#a5f3fc", textTransform: "capitalize", background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 8 }}>
+                      {chronotype.peak || chronotype.peak_slot || "—"}
+                    </p>
+                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ fontSize: 11, color: "#9ca3af", marginBottom: 3 }}>Peak window</p>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: "#0284c7", textTransform: "capitalize" }}>{chronotype.peak_slot || "—"}</p>
+                {/* Body */}
+                <div style={{ background: "#fafafe", padding: "14px 20px", display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+                  <p style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.6, flex: 1, minWidth: 220 }}>
+                    {chronotype.description || "Model is learning your energy pattern."}
+                  </p>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ background: "#ede9fe", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
+                      <p style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>Best for</p>
+                      <p style={{ fontSize: 12, color: "#1e1b4b", fontWeight: 600, marginTop: 2 }}>Deep work</p>
+                    </div>
+                    <div style={{ background: "#ecfdf5", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
+                      <p style={{ fontSize: 10, color: "#059669", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>AI schedules</p>
+                      <p style={{ fontSize: 12, color: "#1e1b4b", fontWeight: 600, marginTop: 2, textTransform: "capitalize" }}>Around your {chronotype.peak_slot || "peak"}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
-            )}
+            ) : taskCount < 5 ? (
+              <div style={{ marginTop: 20, borderRadius: 12, padding: "14px 18px", background: "#f5f3ff", border: "1px dashed #c4b5fd", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 24 }}>🧠</span>
+                <div>
+                  <p style={{ fontWeight: 700, color: "#4c1d95", fontSize: 13 }}>Chronotype locked</p>
+                  <p style={{ color: "#7c3aed", fontSize: 12, marginTop: 2 }}>Complete {5 - taskCount} more tasks to discover your chronotype and unlock personalised scheduling.</p>
+                </div>
+              </div>
+            ) : null}
           </AnalysisPanel>
 
           <AnalysisPanel title="Full Picture" subtitle="Holistic synthesis across all productivity dimensions" icon={Layers} barColor="linear-gradient(135deg, #10b981, #059669)">
