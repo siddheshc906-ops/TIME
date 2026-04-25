@@ -453,7 +453,7 @@ export const Landing = () => {
           for productivity.
         </p>
         <p className="text-slate-400 text-xs">
-          Made by a first-year BTech student · Free during beta
+          Free during beta
         </p>
       </motion.footer>
     </>
