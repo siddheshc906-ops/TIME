@@ -668,7 +668,32 @@ export default function PerformancePage() {
     </BackgroundLayout>
   );
 
-  if (userState === 'new') return <BackgroundLayout><NewUserWelcome /></BackgroundLayout>;
+  if (userState === 'new') return (
+    <BackgroundLayout>
+      <NewUserWelcome />
+      <div style={{
+        maxWidth: 560,
+        margin: "-16px auto 40px",
+        background: "rgba(109,40,217,0.07)",
+        border: "1px solid rgba(109,40,217,0.18)",
+        borderRadius: 14,
+        padding: "14px 20px",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+      }}>
+        <span style={{ fontSize: 20 }}>💡</span>
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 700, color: "#4c1d95", marginBottom: 3 }}>
+            How Performance tracking works
+          </p>
+          <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>
+            Add tasks in the Planner, complete them, and your AI performance insights will unlock automatically. The more you use Timevora, the smarter your analysis gets.
+          </p>
+        </div>
+      </div>
+    </BackgroundLayout>
+  );
 
   const focusObs = buildFocusObs();
   const plannerObs = buildPlannerObs();
