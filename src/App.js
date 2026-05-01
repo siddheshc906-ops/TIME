@@ -22,7 +22,7 @@ function ProtectedRoute({ children }) {
 
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    if (Date.now() > payload.exp * 1000) {
+    if (Date.now() > (payload.exp * 1000) + 60000) {
       localStorage.removeItem("token");
       return <Navigate to="/login" />;
     }
