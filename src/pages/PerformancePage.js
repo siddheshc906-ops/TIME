@@ -387,9 +387,9 @@ export default function PerformancePage() {
       const hasAIPlanner = (plannerData?.planCount || 0) > 0;
       const hasFeedback  = (feedbackData?.total || 0) > 0;
 
-      if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback) {
-        setUserState('new');
-      } else if ((taskCount || 0) < 5) {
+      if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
+  setUserState('new');
+} else if ((taskCount || 0) < 5) {
         setUserState('beginner');
       } else if ((taskCount || 0) < 15) {
         setUserState('intermediate');
@@ -407,7 +407,7 @@ export default function PerformancePage() {
       const res = await fetch(`${BASE_URL}/api/tasks`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
-        const count = Array.isArray(data) ? data.length : 0;
+        const count = Array.isArray(data) ? data.filter(t => !t.is_deleted).length : 0;
         setTaskCount(count);
         return count;
       }
