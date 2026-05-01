@@ -344,7 +344,9 @@ const ChartTooltip = ({ active, payload, label }) => {
 export default function PerformancePage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [userState, setUserState] = useState('new');
+  const [userState, setUserState] = useState(() => {
+    return localStorage.getItem('tv_userState') || 'new';
+  });
   const [taskCount, setTaskCount] = useState(0);
   const [chartData, setChartData] = useState([]);
   const [patterns, setPatterns] = useState(null);
@@ -361,6 +363,14 @@ export default function PerformancePage() {
   const [focusStats, setFocusStats] = useState(null);
   const [plannerStats, setPlannerStats] = useState(null);
   const [showGuidanceChat, setShowGuidanceChat] = useState(false);
+
+  // ✅ FIX: Persist userState so backend sleep doesn't reset to 'new'
+  function updateUserState(state) {
+    if (state !== 'new') {
+      localStorage.setItem('tv_userState', state);
+    }
+    setUserState(state);
+  }
 
   useEffect(() => { fetchAllData(); }, [timeRange]);
 
@@ -387,18 +397,20 @@ export default function PerformancePage() {
       const hasAIPlanner = (plannerData?.planCount || 0) > 0;
       const hasFeedback  = (feedbackData?.total || 0) > 0;
 
+      // ✅ FIX: If backend returned null (failed/sleeping), don't reset userState
       if (taskCount === null) {
-  // Backend failed to respond — keep current userState, don't reset to new
-  return;
-}
-if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
-  setUserState('new');
-} else if ((taskCount || 0) < 5) {
-        setUserState('beginner');
+        // Backend is sleeping — keep whatever userState we have from localStorage
+      } else if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
+        // Only set 'new' if localStorage also doesn't have a saved state
+        if (!localStorage.getItem('tv_userState')) {
+          updateUserState('new');
+        }
+      } else if ((taskCount || 0) < 5) {
+        updateUserState('beginner');
       } else if ((taskCount || 0) < 15) {
-        setUserState('intermediate');
+        updateUserState('intermediate');
       } else {
-        setUserState('active');
+        updateUserState('active');
       }
     } catch (err) {
       setError("Failed to load performance data");
@@ -415,7 +427,7 @@ if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0
         setTaskCount(count);
         return count;
       }
-      return 0;
+      return null; // ✅ FIX: null means backend failed, not genuinely empty
     } catch (err) { console.error(err); return null; }
   };
 
