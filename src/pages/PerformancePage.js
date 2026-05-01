@@ -387,7 +387,11 @@ export default function PerformancePage() {
       const hasAIPlanner = (plannerData?.planCount || 0) > 0;
       const hasFeedback  = (feedbackData?.total || 0) > 0;
 
-      if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
+      if (taskCount === null) {
+  // Backend failed to respond — keep current userState, don't reset to new
+  return;
+}
+if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
   setUserState('new');
 } else if ((taskCount || 0) < 5) {
         setUserState('beginner');
@@ -412,7 +416,7 @@ export default function PerformancePage() {
         return count;
       }
       return 0;
-    } catch (err) { console.error(err); return 0; }
+    } catch (err) { console.error(err); return null; }
   };
 
   const fetchAccuracy = async () => {
