@@ -12,11 +12,10 @@ import {
   ChevronRight, Download, RefreshCw, AlertCircle, Zap, Sun,
   Loader2, ArrowRight, CheckCircle, Activity, MessageCircle,
   Send, X, Lightbulb, Flame, Eye, Star, Layers, BookOpen, Bot,
-  ChevronDown
+  ChevronDown, HelpCircle, ListTodo, Timer, BarChart2
 } from "lucide-react";
 import BackgroundLayout from "../components/BackgroundLayout";
 import ProductivityScoreCard from "../components/ProductivityScoreCard";
-import { NewUserWelcome } from "../components/Onboarding/NewUserWelcome";
 import { GrowingUserPrompt } from "../components/Onboarding/GrowingUserPrompt";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
@@ -40,6 +39,136 @@ function decimalToTime(hour) {
 // ─────────────────────────────────────────────────────────────
 // AI Guidance Chat
 // ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// How It Works Modal
+// ─────────────────────────────────────────────────────────────
+function HowItWorksModal({ onClose }) {
+  const steps = [
+    {
+      icon: ListTodo,
+      color: "#7c3aed",
+      bg: "#f5f3ff",
+      border: "#ddd6fe",
+      title: "1. Add & Complete Tasks",
+      desc: "Go to the Planner, add your daily tasks, and mark them as complete when done. Each completed task teaches Timevora your work patterns.",
+      action: { label: "Open Planner", href: "/tasks" },
+    },
+    {
+      icon: Timer,
+      color: "#f59e0b",
+      bg: "#fffbeb",
+      border: "#fde68a",
+      title: "2. Log Focus Sessions",
+      desc: "Use the Focus timer to track deep work sessions. Your session data builds a picture of your concentration patterns and energy levels throughout the day.",
+      action: { label: "Start Focus", href: "/focus" },
+    },
+    {
+      icon: Brain,
+      color: "#0ea5e9",
+      bg: "#f0f9ff",
+      border: "#bae6fd",
+      title: "3. Generate AI Schedules",
+      desc: "Use the AI Planner to create intelligent daily schedules. Each plan you generate and execute improves the AI's understanding of your productivity style.",
+      action: { label: "Open AI Planner", href: "/ai-planner" },
+    },
+    {
+      icon: BarChart2,
+      color: "#059669",
+      bg: "#ecfdf5",
+      border: "#a7f3d0",
+      title: "4. Unlock Performance Insights",
+      desc: "After using all three features, this page comes alive — showing your chronotype, peak hours, task accuracy, focus patterns, and personalised AI coaching.",
+      action: null,
+    },
+  ];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 60,
+      background: "rgba(0,0,0,0.4)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <motion.div
+        initial={{ opacity: 0, y: 24, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 24, scale: 0.96 }}
+        transition={{ type: "spring", stiffness: 300, damping: 28 }}
+        style={{
+          width: "100%", maxWidth: 580,
+          background: "var(--card-bg)", borderRadius: 24,
+          boxShadow: "0 32px 80px rgba(109,40,217,0.18), 0 8px 32px rgba(0,0,0,0.12)",
+          overflow: "hidden", border: "1px solid rgba(109,40,217,0.12)",
+          maxHeight: "90vh", overflowY: "auto",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+          padding: "20px 24px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <HelpCircle size={19} color="white" />
+            </div>
+            <div>
+              <p style={{ color: "white", fontWeight: 800, fontSize: 16 }}>How Performance Works</p>
+              <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>4 steps to unlock your full analytics</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={15} color="white" />
+          </button>
+        </div>
+
+        {/* Steps */}
+        <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {steps.map((step, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.08, type: "spring", stiffness: 260, damping: 24 }}
+              style={{
+                background: step.bg,
+                border: `1px solid ${step.border}`,
+                borderRadius: 16, padding: "16px 18px",
+                display: "flex", gap: 14, alignItems: "flex-start",
+              }}
+            >
+              <div style={{ width: 38, height: 38, borderRadius: 11, background: "white", border: `1px solid ${step.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+                <step.icon size={17} color={step.color} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: 700, fontSize: 13, color: "var(--text-primary)", marginBottom: 4 }}>{step.title}</p>
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.65 }}>{step.desc}</p>
+                {step.action && (
+                  <a href={step.action.href} style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    marginTop: 10, fontSize: 12, fontWeight: 700,
+                    color: step.color, textDecoration: "none",
+                    background: "white", padding: "5px 12px", borderRadius: 8,
+                    border: `1px solid ${step.border}`,
+                  }}>
+                    {step.action.label} <ArrowRight size={11} />
+                  </a>
+                )}
+              </div>
+            </motion.div>
+          ))}
+
+          {/* Bottom note */}
+          <div style={{ background: "var(--card-bg)", borderRadius: 12, padding: "12px 16px", border: "1px solid #f0f0f0", marginTop: 4 }}>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center" }}>
+              💡 You don't need to complete all steps at once. Start with any feature and your insights will grow over time.
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function AIGuidanceChat({ userContext, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -114,7 +243,7 @@ function AIGuidanceChat({ userContext, onClose }) {
         style={{
           width: "100%", maxWidth: 640, height: 600,
           display: "flex", flexDirection: "column",
-          background: "white", borderRadius: 20,
+          background: "var(--card-bg)", borderRadius: 20,
           boxShadow: "0 32px 80px rgba(109,40,217,0.18), 0 8px 32px rgba(0,0,0,0.12)",
           overflow: "hidden", border: "1px solid rgba(109,40,217,0.12)",
         }}
@@ -137,16 +266,16 @@ function AIGuidanceChat({ userContext, onClose }) {
           </button>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "20px", background: "#fafaf9" }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px", background: "var(--card-bg)" }}>
           {showWelcome && messages.length === 0 && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ paddingTop: 24 }}>
-              <p style={{ fontWeight: 700, fontSize: 15, color: "#1e1b4b", marginBottom: 6 }}>What would you like to explore?</p>
+              <p style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", marginBottom: 6 }}>What would you like to explore?</p>
               <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 20 }}>Ask anything about your performance, habits, or how to improve.</p>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {suggestedQuestions.map((q, i) => (
                   <button key={i} onClick={() => setInput(q)} style={{
                     padding: "8px 14px", borderRadius: 20, fontSize: 12, cursor: "pointer",
-                    background: "white", border: "1px solid #e0e0f0", color: "#4f46e5", fontWeight: 500,
+                    background: "var(--input-bg)", border: "1px solid var(--card-border)", color: "var(--accent)", fontWeight: 500,
                     boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
                   }}>{q}</button>
                 ))}
@@ -160,7 +289,7 @@ function AIGuidanceChat({ userContext, onClose }) {
                 <div style={{
                   maxWidth: "80%", padding: "12px 16px",
                   borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                  background: msg.role === "user" ? "linear-gradient(135deg, #6d28d9, #4f46e5)" : msg.isError ? "#fef2f2" : "white",
+                  background: msg.role === "user" ? "linear-gradient(135deg, var(--accent), var(--accent-hover))" : msg.isError ? "#fef2f2" : "var(--card-bg)",
                   border: msg.role !== "user" ? (msg.isError ? "1px solid #fecaca" : "1px solid #e5e7eb") : "none",
                   boxShadow: msg.role !== "user" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
                 }}>
@@ -267,7 +396,7 @@ function InsightCard({ icon: Icon, label, observation, detail, accent = "violet"
         )}
       </div>
       <p style={{ fontSize: 14, fontWeight: 600, color: "#111827", lineHeight: 1.45, marginBottom: detail ? 7 : 0 }}>{observation}</p>
-      {detail && <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.55 }}>{detail}</p>}
+      {detail && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>{detail}</p>}
     </motion.div>
   );
 }
@@ -281,7 +410,7 @@ function AnalysisPanel({ title, subtitle, icon: Icon, barColor, children }) {
       initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 100, damping: 20 }}
       style={{
-        background: "white", borderRadius: 20,
+        background: "var(--card-bg)", borderRadius: 20,
         boxShadow: "0 2px 16px rgba(109,40,217,0.07), 0 1px 4px rgba(0,0,0,0.05)",
         border: "1px solid rgba(109,40,217,0.09)", overflow: "hidden",
       }}
@@ -329,7 +458,7 @@ const ChartTooltip = ({ active, payload, label }) => {
   return (
     <div style={{
       background: "white", border: "1px solid #e5e7eb", borderRadius: 10,
-      padding: "10px 14px", fontSize: 12, color: "#374151",
+      padding: "10px 14px", fontSize: 12, color: "var(--text-primary)",
       boxShadow: "0 4px 16px rgba(0,0,0,0.10)"
     }}>
       <p style={{ marginBottom: 4, color: "#9ca3af", fontSize: 11 }}>{label}</p>
@@ -363,6 +492,7 @@ export default function PerformancePage() {
   const [focusStats, setFocusStats] = useState(null);
   const [plannerStats, setPlannerStats] = useState(null);
   const [showGuidanceChat, setShowGuidanceChat] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   // ✅ FIX: Persist userState so backend sleep doesn't reset to 'new'
   function updateUserState(state) {
@@ -660,7 +790,7 @@ export default function PerformancePage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
         <div style={{ textAlign: "center" }}>
           <AlertCircle color="#e11d48" size={36} style={{ margin: "0 auto 12px" }} />
-          <h2 style={{ fontSize: 18, fontWeight: 700, color: "#111827", marginBottom: 8 }}>Failed to load data</h2>
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>Failed to load data</h2>
           <p style={{ color: "#6b7280", marginBottom: 20 }}>{error}</p>
           <button onClick={fetchAllData} style={{ padding: "10px 24px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", color: "white", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>Retry</button>
         </div>
@@ -670,27 +800,99 @@ export default function PerformancePage() {
 
   if (userState === 'new') return (
     <BackgroundLayout>
-      <NewUserWelcome />
-      <div style={{
-        maxWidth: 560,
-        margin: "-16px auto 40px",
-        background: "rgba(109,40,217,0.07)",
-        border: "1px solid rgba(109,40,217,0.18)",
-        borderRadius: 14,
-        padding: "14px 20px",
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 12,
-      }}>
-        <span style={{ fontSize: 20 }}>💡</span>
-        <div>
-          <p style={{ fontSize: 13, fontWeight: 700, color: "#4c1d95", marginBottom: 3 }}>
-            How Performance tracking works
-          </p>
-          <p style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6 }}>
-            Add tasks in the Planner, complete them, and your AI performance insights will unlock automatically. The more you use Timevora, the smarter your analysis gets.
-          </p>
-        </div>
+      <AnimatePresence>
+        {showHowItWorks && <HowItWorksModal onClose={() => setShowHowItWorks(false)} />}
+      </AnimatePresence>
+
+      <div style={{ minHeight: "80vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 24px", textAlign: "center" }}>
+
+        {/* Sparkle icon — matches original */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 20 }}
+          style={{ width: 80, height: 80, borderRadius: 24, background: "rgba(109,40,217,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 28 }}
+        >
+          <Sparkles size={36} color="#7c3aed" />
+        </motion.div>
+
+        {/* Title */}
+        <motion.h1
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.07 }}
+          style={{ fontSize: 36, fontWeight: 800, color: "#7c3aed", letterSpacing: "-0.02em", marginBottom: 14 }}
+        >
+          Welcome to TIMEVORA!
+        </motion.h1>
+
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          style={{ fontSize: 15, color: "#6b7280", maxWidth: 480, lineHeight: 1.7, marginBottom: 40 }}
+        >
+          Your journey to better productivity starts here. Learn how to use all features and unlock AI-powered insights.
+        </motion.p>
+
+        {/* 4 feature cards — matches original grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.16 }}
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, maxWidth: 560, width: "100%", marginBottom: 40 }}
+        >
+          {[
+            { icon: ListTodo, title: "Smart Scheduling", desc: 'Tell me your tasks naturally—"Study 2 hours, then gym"—and I\'ll create the perfect schedule.', color: "#7c3aed", bg: "#f5f3ff" },
+            { icon: Brain, title: "AI That Learns", desc: "The more you use TIMEVORA, the smarter it gets—learning your patterns to make better suggestions.", color: "#4f46e5", bg: "#eef2ff" },
+            { icon: Target, title: "Track Progress", desc: "See detailed analytics about your productivity patterns and watch yourself improve.", color: "#059669", bg: "#ecfdf5" },
+            { icon: TrendingUp, title: "Weekly Insights", desc: "Get personalized recommendations to optimize your time and boost productivity.", color: "#d97706", bg: "#fffbeb" },
+          ].map((card, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.18 + i * 0.05 }}
+              style={{ background: "white", borderRadius: 16, padding: "20px", textAlign: "left", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", border: "1px solid #f0f0f0" }}
+            >
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: card.bg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                <card.icon size={18} color={card.color} />
+              </div>
+              <p style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", marginBottom: 6 }}>{card.title}</p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>{card.desc}</p>
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* Main CTA — "How does Performance work?" replaces "Add Your First Task" */}
+        <motion.button
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.38 }}
+          whileHover={{ scale: 1.04, y: -2 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={() => setShowHowItWorks(true)}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 10,
+            padding: "15px 32px",
+            background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+            border: "none", borderRadius: 16, cursor: "pointer",
+            color: "white", fontSize: 15, fontWeight: 700,
+            boxShadow: "0 8px 28px rgba(109,40,217,0.38)",
+          }}
+        >
+          <HelpCircle size={17} /> How does Performance work? →
+        </motion.button>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.44 }}
+          style={{ fontSize: 12, color: "#9ca3af", marginTop: 14 }}
+        >
+          Takes less than 2 minutes to get started
+        </motion.p>
+
       </div>
     </BackgroundLayout>
   );
@@ -708,6 +910,7 @@ export default function PerformancePage() {
         {showGuidanceChat && (
           <AIGuidanceChat userContext={{ taskCount, patterns, chronotype, feedbackSummary }} onClose={() => setShowGuidanceChat(false)} />
         )}
+        {showHowItWorks && <HowItWorksModal onClose={() => setShowHowItWorks(false)} />}
       </AnimatePresence>
 
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ maxWidth: 1020, margin: "0 auto", padding: "48px 24px 72px" }}>
@@ -733,7 +936,7 @@ export default function PerformancePage() {
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <div style={{ position: "relative" }}>
-                <select value={timeRange} onChange={e => setTimeRange(parseInt(e.target.value))} style={{ appearance: "none", padding: "9px 34px 9px 14px", borderRadius: 10, fontSize: 13, background: "white", border: "1px solid #e5e7eb", color: "#374151", cursor: "pointer", outline: "none", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                <select value={timeRange} onChange={e => setTimeRange(parseInt(e.target.value))} style={{ appearance: "none", padding: "9px 34px 9px 14px", borderRadius: 10, fontSize: 13, background: "white", border: "1px solid #e5e7eb", color: "var(--text-primary)", cursor: "pointer", outline: "none", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                   <option value={7}>Last 7 days</option>
                   <option value={30}>Last 30 days</option>
                   <option value={90}>Last 90 days</option>
@@ -743,6 +946,10 @@ export default function PerformancePage() {
 
               <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowGuidanceChat(true)} style={{ padding: "9px 16px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", border: "none", borderRadius: 10, color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 2px 10px rgba(109,40,217,0.3)" }}>
                 <MessageCircle size={14} /> AI Coach
+              </motion.button>
+
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowHowItWorks(true)} style={{ padding: "9px 16px", background: "white", border: "1px solid #ddd6fe", borderRadius: 10, color: "#7c3aed", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <HelpCircle size={14} /> How it works
               </motion.button>
 
               <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={trainModel} disabled={training || taskCount < 5} style={{ padding: "9px 16px", background: "white", border: "1px solid #e5e7eb", borderRadius: 10, color: taskCount < 5 ? "#d1d5db" : "#374151", fontSize: 13, fontWeight: 500, cursor: taskCount < 5 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
@@ -892,11 +1099,11 @@ export default function PerformancePage() {
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <div style={{ background: "#ede9fe", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
                       <p style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>Best for</p>
-                      <p style={{ fontSize: 12, color: "#1e1b4b", fontWeight: 600, marginTop: 2 }}>Deep work</p>
+                      <p style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600, marginTop: 2 }}>Deep work</p>
                     </div>
                     <div style={{ background: "#ecfdf5", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
                       <p style={{ fontSize: 10, color: "#059669", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>AI schedules</p>
-                      <p style={{ fontSize: 12, color: "#1e1b4b", fontWeight: 600, marginTop: 2, textTransform: "capitalize" }}>Around your {chronotype.peak_slot || "peak"}</p>
+                      <p style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600, marginTop: 2, textTransform: "capitalize" }}>Around your {chronotype.peak_slot || "peak"}</p>
                     </div>
                   </div>
                 </div>
@@ -937,8 +1144,8 @@ export default function PerformancePage() {
                         return (
                           <tr key={i} style={{ borderBottom: "1px solid #f9fafb" }}>
                             <td style={{ padding: "11px 12px", fontSize: 13, color: "#6b7280" }}>{day.date ? new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A'}</td>
-                            <td style={{ padding: "11px 12px", fontSize: 13, color: "#374151" }}>{total}</td>
-                            <td style={{ padding: "11px 12px", fontSize: 13, color: "#374151" }}>{done}</td>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "var(--text-primary)" }}>{total}</td>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "var(--text-primary)" }}>{done}</td>
                             <td style={{ padding: "11px 12px", fontSize: 13, color: "#6b7280" }}>{safeFocus.toFixed(1)}h</td>
                             <td style={{ padding: "11px 12px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
