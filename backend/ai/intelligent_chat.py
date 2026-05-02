@@ -467,8 +467,9 @@ class IntelligentChatEngine:
                     window_status.append(f"POST-{college_label.upper()} window ({college_end}–{free_until}) is available.")
 
                 # Compute scientific boundaries
-                wake_h     = r.get("college_start_h", 7.0) - 2  # fallback estimate
-                wake_raw   = r.get("wake_raw", wake_h)
+                # FIX: always use actual saved wake_up — old code derived wake from
+                # college_start-2 which was wrong when user saved a specific wake time.
+                wake_raw   = r.get("wake_raw", r.get("wake", 7.0))
                 sleep_h    = r.get("sleep", 23.0)
                 earliest_task = self._fmt_hour(float(wake_raw) + 1.0)   # +60 min morning buffer
                 latest_task   = self._fmt_hour(float(sleep_h) - 0.5)    # -30 min pre-sleep buffer
@@ -605,6 +606,7 @@ class IntelligentChatEngine:
         if hour is None:
             return ""
         h = int(hour)
+        
         m = int((hour - h) * 60)
         return f"{h % 12 or 12}:{m:02d} {'AM' if h < 12 else 'PM'}"
 
