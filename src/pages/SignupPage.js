@@ -136,8 +136,8 @@ export default function SignupPage() {
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <BackgroundLayout>
         <div className="min-h-screen flex items-center justify-center px-4">
-          <div className="bg-white/80 backdrop-blur p-8 rounded-2xl w-full max-w-sm shadow-xl border">
-            <h2 className="text-2xl font-bold mb-4 text-center">Create Account</h2>
+          <div className="backdrop-blur p-8 rounded-2xl w-full max-w-sm shadow-xl" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}>
+            <h2 className="text-2xl font-bold mb-4 text-center" style={{color:"var(--text-primary)"}}>Create Account</h2>
 
             {/* ── Tab switcher ── */}
             <div className="flex rounded-xl overflow-hidden border mb-5">
@@ -145,11 +145,12 @@ export default function SignupPage() {
                 <button
                   key={t}
                   onClick={() => { setTab(t); setMsg(""); setSuccess(false); setOtpSent(false); }}
-                  className={`flex-1 py-2 text-sm font-medium transition ${
+                  className="flex-1 py-2 text-sm font-medium transition"
+                  style={
                     tab === t
-                      ? "bg-violet-600 text-white"
-                      : "bg-white text-gray-500 hover:bg-violet-50"
-                  }`}
+                      ? { background: "var(--accent)", color: "#fff" }
+                      : { background: "var(--input-bg)", color: "var(--text-secondary)" }
+                  }
                 >
                   {t === TAB_EMAIL ? "Email" : "Phone OTP"}
                 </button>
@@ -160,13 +161,13 @@ export default function SignupPage() {
             {tab === TAB_EMAIL && (
               <>
                 <input
-                  className="border p-3 w-full mb-3 rounded-xl bg-white/70"
+                  className="p-3 w-full mb-3 rounded-xl" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                   placeholder="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
                 <input
-                  className="border p-3 w-full mb-3 rounded-xl bg-white/70"
+                  className="p-3 w-full mb-3 rounded-xl" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                   type="password"
                   placeholder="Password"
                   value={password}
@@ -176,7 +177,7 @@ export default function SignupPage() {
                 <button
                   onClick={signup}
                   disabled={loading}
-                  className="bg-violet-600 text-white w-full py-3 rounded-xl hover:bg-violet-700 transition disabled:opacity-60"
+                  className="text-white w-full py-3 rounded-xl transition disabled:opacity-60" style={{background:"var(--accent)"}}
                 >
                   Create Account
                 </button>
@@ -217,7 +218,7 @@ export default function SignupPage() {
             {tab === TAB_PHONE && (
               <>
                 <input
-                  className="border p-3 w-full mb-3 rounded-xl bg-white/70"
+                  className="p-3 w-full mb-3 rounded-xl" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                   placeholder="Phone number (e.g. 9876543210)"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
@@ -228,7 +229,7 @@ export default function SignupPage() {
                   <button
                     onClick={handleSendOtp}
                     disabled={otpLoading}
-                    className="bg-violet-600 text-white w-full py-3 rounded-xl hover:bg-violet-700 transition disabled:opacity-60"
+                    className="text-white w-full py-3 rounded-xl transition disabled:opacity-60" style={{background:"var(--accent)"}}
                   >
                     {otpLoading ? "Sending…" : "Send OTP"}
                   </button>
@@ -238,7 +239,7 @@ export default function SignupPage() {
                       OTP sent to +91 {phone}
                     </p>
                     <input
-                      className="border p-3 w-full mb-3 rounded-xl bg-white/70 tracking-widest text-center text-lg"
+                      className="p-3 w-full mb-3 rounded-xl tracking-widest text-center text-lg" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                       placeholder="Enter 6-digit OTP"
                       value={otp}
                       onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
@@ -247,7 +248,7 @@ export default function SignupPage() {
                     <button
                       onClick={handleVerifyOtp}
                       disabled={loading}
-                      className="bg-violet-600 text-white w-full py-3 rounded-xl hover:bg-violet-700 transition disabled:opacity-60"
+                      className="text-white w-full py-3 rounded-xl transition disabled:opacity-60" style={{background:"var(--accent)"}}
                     >
                       {loading ? "Verifying…" : "Verify & Create Account"}
                     </button>
@@ -269,7 +270,7 @@ export default function SignupPage() {
             )}
 
             {/* Link to login — original preserved */}
-            <p className="text-center mt-5 text-sm text-gray-600">
+            <p className="text-center mt-5 text-sm" style={{color:"var(--text-secondary)"}}>
               Already have an account?{" "}
               <a href="/login" className="text-violet-600 hover:underline">Log in</a>
             </p>
