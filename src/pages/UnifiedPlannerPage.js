@@ -23,9 +23,9 @@ function authHeaders() {
 }
 
 const PRIORITY = {
-  high:   { label: "High",   bar: "border-l-red-500",    badge: "bg-red-50 text-red-600 ring-red-200"         },
-  medium: { label: "Medium", bar: "border-l-violet-500", badge: "bg-violet-50 text-violet-600 ring-violet-200" },
-  low:    { label: "Low",    bar: "border-l-sky-400",    badge: "bg-sky-50 text-sky-600 ring-sky-200"          },
+  high:   { label: "High",   bar: "border-l-red-500",    badgeStyle: { background: "rgba(239,68,68,0.15)",    color: "#f87171", outline: "1px solid rgba(239,68,68,0.3)"    } },
+  medium: { label: "Medium", bar: "border-l-violet-500", badgeStyle: { background: "rgba(139,92,246,0.15)",  color: "#a78bfa", outline: "1px solid rgba(139,92,246,0.3)"  } },
+  low:    { label: "Low",    bar: "border-l-sky-400",    badgeStyle: { background: "rgba(56,189,248,0.15)",   color: "#38bdf8", outline: "1px solid rgba(56,189,248,0.3)"   } },
 };
 
 const DAYS = [
@@ -83,7 +83,12 @@ function ConfettiBurst({ trigger }) {
 
 export const UnifiedPlannerPage = () => {
   // ── TODO state - HYBRID: localStorage for speed, backend for persistence ──
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState(() => {
+    try {
+      const saved = localStorage.getItem("todo-tasks");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [newTask, setNewTask] = useState("");
   const [priority, setPriority] = useState("medium");
   const [editingId, setEditingId] = useState(null);
@@ -146,37 +151,53 @@ export const UnifiedPlannerPage = () => {
         headers: authHeaders(),
       });
       
-      // ✅ FIX 2: Only update tasks if response is actually OK (not 401/403/500)
       if (res.ok) {
         const serverTasks = await res.json();
         
         if (Array.isArray(serverTasks)) {
-          // Server is the single source of truth — wipe localStorage and use server data
-          localStorage.removeItem("todo-tasks");
-          // ✅ FIX: Deduplicate by _id before setting — prevents duplicate display
+          // ✅ FIX: Merge server tasks with local tasks
+          // Local completed state wins over server if server is stale (Render sleep)
+          const localTasks = (() => {
+            try {
+              const saved = localStorage.getItem("todo-tasks");
+              return saved ? JSON.parse(saved) : [];
+            } catch { return []; }
+          })();
+
+          const localMap = {};
+          localTasks.forEach(t => { if (t._id) localMap[t._id] = t; });
+
           const seen = new Set();
-          const unique = serverTasks.filter(t => {
-            const key = t._id || t.id;
-            if (seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
-          const sorted = [...unique].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          const merged = serverTasks
+            .filter(t => {
+              const key = t._id || t.id;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            })
+            .map(serverTask => {
+              const local = localMap[serverTask._id];
+              // If local has a more recent completed state, keep it
+              if (local && local.completed !== serverTask.completed) {
+                return { ...serverTask, completed: local.completed };
+              }
+              return serverTask;
+            });
+
+          const sorted = [...merged].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
           setTasks(sorted);
+          localStorage.setItem("todo-tasks", JSON.stringify(sorted));
         }
         setSyncStatus("synced");
       } else if (res.status === 401) {
-        // ✅ FIX 3: Don't wipe tasks on 401 — keep localStorage tasks intact
         console.warn("Auth failed during sync - keeping local tasks");
         setSyncStatus("offline");
-        // Don't setTasks here — localStorage tasks are already loaded
       } else {
         setSyncStatus("offline");
       }
     } catch (err) {
       console.error("Sync with backend failed:", err);
       setSyncStatus("offline");
-      // Keep whatever is in localStorage — already loaded above
     } finally {
       setLoading(false);
     }
@@ -303,6 +324,10 @@ export const UnifiedPlannerPage = () => {
     setTasks(prev =>
       prev.map(t => t._id === id ? updatedTask : t)
     );
+
+    // ✅ FIX: Immediately save completed state to localStorage so it survives backend sleep
+    const currentTasks = tasks.map(t => t._id === id ? updatedTask : t);
+    localStorage.setItem("todo-tasks", JSON.stringify(currentTasks));
     
     if (!current) {
       setJustCompleted(id);
@@ -401,7 +426,7 @@ export const UnifiedPlannerPage = () => {
                   initial={{ opacity: 0, x: -16 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.05, type: "spring", stiffness: 280, damping: 25 }}
-                  className="text-3xl font-bold text-gray-900 tracking-tight"
+                  className="text-3xl font-bold tracking-tight" style={{color:"var(--text-primary)"}}
                 >
                   Planner
                 </motion.h1>
@@ -409,7 +434,7 @@ export const UnifiedPlannerPage = () => {
                   initial={{ opacity: 0, x: -12 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1, type: "spring", stiffness: 280, damping: 25 }}
-                  className="text-gray-500 mt-1 text-sm"
+                  className="mt-1 text-sm" style={{color:"var(--text-secondary)"}}
                 >
                   Stay organised, stay ahead
                 </motion.p>
@@ -420,10 +445,10 @@ export const UnifiedPlannerPage = () => {
           {/* Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
             {[
-              { icon: <ListTodo size={16} />, label: "Total", value: stats.total, color: "text-gray-700" },
-              { icon: <Check size={16} />, label: "Done", value: stats.completed, color: "text-emerald-600" },
-              { icon: <Clock size={16} />, label: "Pending", value: stats.pending, color: "text-violet-600" },
-              { icon: <Flame size={16} />, label: "Urgent", value: stats.high, color: "text-red-500" },
+              { icon: <ListTodo size={16} />, label: "Total",   value: stats.total,     color: "var(--text-secondary)" },
+              { icon: <Check   size={16} />, label: "Done",    value: stats.completed, color: "#34d399"                 },
+              { icon: <Clock   size={16} />, label: "Pending", value: stats.pending,   color: "var(--accent)"           },
+              { icon: <Flame   size={16} />, label: "Urgent",  value: stats.high,      color: "#f87171"                 },
             ].map((s, i) => (
               <motion.div
                 key={s.label}
@@ -432,12 +457,12 @@ export const UnifiedPlannerPage = () => {
                 initial="hidden"
                 animate="show"
                 whileHover={{ y: -3, scale: 1.02, transition: { type: "spring", stiffness: 400, damping: 20 } }}
-                className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 cursor-default"
+                className="rounded-2xl p-4 shadow-sm cursor-default" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
               >
-                <div className={`flex items-center gap-1.5 ${s.color} mb-1 text-xs font-medium`}>
+                <div className="flex items-center gap-1.5 mb-1 text-xs font-medium" style={{ color: s.color }}>
                   {s.icon} {s.label}
                 </div>
-                <p className="text-2xl font-bold text-gray-900">
+                <p className="text-2xl font-bold" style={{color:"var(--text-primary)"}}>
                   <AnimatedNumber value={s.value} />
                 </p>
               </motion.div>
@@ -452,20 +477,20 @@ export const UnifiedPlannerPage = () => {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ type: "spring", stiffness: 260, damping: 24 }}
-                className="mb-6 bg-white rounded-2xl p-4 shadow-sm border border-gray-100"
+                className="mb-6 rounded-2xl p-4 shadow-sm" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
               >
-                <div className="flex justify-between text-sm text-gray-600 mb-2">
+                <div className="flex justify-between text-sm mb-2" style={{color:"var(--text-secondary)"}}>
                   <span className="font-medium">Today's progress</span>
                   <motion.span
                     key={completionPct}
                     initial={{ opacity: 0, scale: 0.8 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="font-semibold text-violet-600"
+                    className="font-semibold" style={{color:"var(--accent)"}}
                   >
                     {completionPct}%
                   </motion.span>
                 </div>
-                <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="h-2.5 rounded-full overflow-hidden" style={{ background: "var(--divider)" }}>
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${completionPct}%` }}
@@ -501,7 +526,7 @@ export const UnifiedPlannerPage = () => {
           </AnimatePresence>
 
           {/* Tabs */}
-          <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-2xl w-fit">
+          <div className="flex gap-1 mb-6 p-1 rounded-2xl w-fit" style={{background:"var(--input-bg)"}}>
             {[
               { id: "todo", label: `To-Do${stats.total > 0 ? ` (${stats.total})` : ""}` },
               { id: "week", label: "Week Planner" },
@@ -510,14 +535,14 @@ export const UnifiedPlannerPage = () => {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 whileTap={{ scale: 0.97 }}
-                className={`relative px-5 py-2 rounded-xl text-sm font-medium transition-colors duration-200 ${
-                  activeTab === tab.id ? "text-violet-700" : "text-gray-500 hover:text-gray-700"
-                }`}
+                className="relative px-5 py-2 rounded-xl text-sm font-medium transition-colors duration-200"
+                style={{ color: activeTab === tab.id ? "var(--text-primary)" : "var(--text-muted)" }}
               >
                 {activeTab === tab.id && (
                   <motion.div
                     layoutId="activeTab"
-                    className="absolute inset-0 bg-white shadow-sm rounded-xl"
+                    className="absolute inset-0 rounded-xl shadow-sm"
+                    style={{ background: "var(--card-bg)" }}
                     transition={{ type: "spring", stiffness: 400, damping: 30 }}
                   />
                 )}
@@ -542,7 +567,7 @@ export const UnifiedPlannerPage = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05, type: "spring", stiffness: 280, damping: 26 }}
-                  className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4"
+                  className="rounded-2xl shadow-sm p-4" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                 >
                   <div className="flex gap-3 flex-wrap sm:flex-nowrap">
                     <input
@@ -551,12 +576,12 @@ export const UnifiedPlannerPage = () => {
                       onChange={e => setNewTask(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && addTodoTask()}
                       placeholder="What needs to be done?"
-                      className="flex-1 min-w-0 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent transition-shadow"
+                      className="flex-1 min-w-0 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                     />
                     <select
                       value={priority}
                       onChange={e => setPriority(e.target.value)}
-                      className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                      className="rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                     >
                       <option value="high">🔴 High</option>
                       <option value="medium">🟣 Medium</option>
@@ -565,7 +590,7 @@ export const UnifiedPlannerPage = () => {
                     <button
                       onClick={addTodoTask}
                       disabled={!newTask.trim()}
-                      className="bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap"
+                      className="disabled:opacity-40 text-white px-5 py-2.5 rounded-xl text-sm font-medium flex items-center gap-2 transition-colors whitespace-nowrap" style={{background:"var(--accent)"}}
                     >
                       <Plus size={16} /> Add Task
                     </button>
@@ -586,7 +611,7 @@ export const UnifiedPlannerPage = () => {
                     initial={{ opacity: 0, scale: 0.96 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ type: "spring", stiffness: 260, damping: 24 }}
-                    className="text-center py-20 bg-white rounded-2xl border border-gray-100"
+                    className="text-center py-20 rounded-2xl" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                   >
                     <motion.div
                       animate={{ y: [0, -6, 0] }}
@@ -595,8 +620,8 @@ export const UnifiedPlannerPage = () => {
                     >
                       📋
                     </motion.div>
-                    <p className="text-gray-500 font-medium">No tasks yet</p>
-                    <p className="text-gray-400 text-sm mt-1">Add your first task above</p>
+                    <p className="font-medium" style={{ color: "var(--text-secondary)" }}>No tasks yet</p>
+                    <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>Add your first task above</p>
                   </motion.div>
                 ) : (
                   <div className="space-y-2">
@@ -609,7 +634,7 @@ export const UnifiedPlannerPage = () => {
                           animate="show"
                           exit="exit"
                           layout
-                          className={`bg-white rounded-2xl border-l-4 border border-gray-100 ${PRIORITY[task.priority]?.bar || "border-l-violet-500"} shadow-sm relative overflow-hidden`}
+                          className={`rounded-2xl border-l-4 ${PRIORITY[task.priority]?.bar || "border-l-violet-500"} shadow-sm relative overflow-hidden`} style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                           whileHover={{
                             y: -2,
                             boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
@@ -628,7 +653,7 @@ export const UnifiedPlannerPage = () => {
                                   if (e.key === "Escape") setEditingId(null);
                                 }}
                                 autoFocus
-                                className="flex-1 border border-violet-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                className="flex-1 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--accent)",color:"var(--text-primary)"}}
                               />
                               <button
                                 onClick={() => saveEdit(task._id)}
@@ -661,14 +686,18 @@ export const UnifiedPlannerPage = () => {
                               <div className="flex-1 min-w-0">
                                 <p
                                   className={`text-sm font-medium truncate ${
-                                    task.completed ? "line-through text-gray-400" : "text-gray-800"
+                                    task.completed ? "line-through" : ""
                                   }`}
+                                  style={{ color: task.completed ? "var(--text-muted)" : "var(--text-primary)" }}
                                 >
                                   {task.text}
                                 </p>
                               </div>
 
-                              <span className={`text-xs px-2 py-0.5 rounded-full ring-1 font-medium flex-shrink-0 ${PRIORITY[task.priority]?.badge || ""}`}>
+                              <span
+                                className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0"
+                                style={PRIORITY[task.priority]?.badgeStyle || PRIORITY.medium.badgeStyle}
+                              >
                                 {PRIORITY[task.priority]?.label}
                               </span>
 
@@ -678,13 +707,19 @@ export const UnifiedPlannerPage = () => {
                                     setEditingId(task._id);
                                     setEditText(task.text);
                                   }}
-                                  className="p-1.5 text-gray-400 hover:text-violet-600 rounded-lg transition-colors"
+                                  className="p-1.5 rounded-lg transition-colors"
+                                  style={{ color: "var(--text-muted)" }}
+                                  onMouseEnter={e => e.currentTarget.style.color = "var(--accent)"}
+                                  onMouseLeave={e => e.currentTarget.style.color = "var(--text-muted)"}
                                 >
                                   <Edit2 size={15} />
                                 </button>
                                 <button
                                   onClick={() => deleteTodoTask(task._id)}
-                                  className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
+                                  className="p-1.5 rounded-lg transition-colors"
+                                  style={{ color: "var(--text-muted)" }}
+                                  onMouseEnter={e => e.currentTarget.style.color = "#f87171"}
+                                  onMouseLeave={e => e.currentTarget.style.color = "var(--text-muted)"}
                                 >
                                   <Trash2 size={15} />
                                 </button>
@@ -721,7 +756,7 @@ export const UnifiedPlannerPage = () => {
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       transition={{ delay: i * 0.05, type: "spring", stiffness: 280, damping: 26 }}
                       whileHover={{ y: -3, transition: { type: "spring", stiffness: 400, damping: 24 } }}
-                      className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col"
+                      className="rounded-2xl shadow-sm overflow-hidden flex flex-col" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                     >
                       <div className={`bg-gradient-to-r ${day.gradient} p-4 text-white`}>
                         <div className="flex items-center justify-between">
@@ -746,7 +781,8 @@ export const UnifiedPlannerPage = () => {
                             <motion.p
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
-                              className="text-center text-gray-400 text-xs py-6"
+                              className="text-center text-xs py-6"
+                              style={{ color: "var(--text-muted)" }}
                             >
                               No tasks yet
                             </motion.p>
@@ -760,7 +796,7 @@ export const UnifiedPlannerPage = () => {
                                 transition={{ type: "spring", stiffness: 300, damping: 28 }}
                                 onMouseEnter={() => setHoveredTask(task.id)}
                                 onMouseLeave={() => setHoveredTask(null)}
-                                className="bg-gray-50 rounded-xl p-2.5 flex items-center gap-2"
+                                className="rounded-xl p-2.5 flex items-center gap-2" style={{background:"var(--input-bg)"}}
                               >
                                 <button
                                   onClick={() => toggleWeekTask(day.id, task.id)}
@@ -773,8 +809,9 @@ export const UnifiedPlannerPage = () => {
 
                                 <span
                                   className={`text-xs flex-1 transition-colors ${
-                                    task.completed ? "line-through text-gray-400" : "text-gray-700"
+                                    task.completed ? "line-through" : ""
                                   }`}
+                                  style={{ color: task.completed ? "var(--text-muted)" : "var(--text-primary)" }}
                                 >
                                   {task.text}
                                 </span>
@@ -799,7 +836,7 @@ export const UnifiedPlannerPage = () => {
                         </AnimatePresence>
                       </div>
 
-                      <div className="p-3 border-t border-gray-100">
+                      <div className="p-3" style={{borderTop:"1px solid var(--card-border)"}}>
                         <AnimatePresence mode="wait">
                           {activeDay === day.id ? (
                             <motion.div
@@ -822,12 +859,12 @@ export const UnifiedPlannerPage = () => {
                                 }}
                                 placeholder="Task name…"
                                 autoFocus
-                                className="w-full text-xs border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                className="w-full text-xs rounded-xl px-3 py-2 focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}}
                               />
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => addWeekTask(day.id)}
-                                  className="flex-1 bg-violet-600 text-white text-xs py-1.5 rounded-xl hover:bg-violet-700 transition-colors"
+                                  className="flex-1 text-white text-xs py-1.5 rounded-xl transition-colors" style={{background:"var(--accent)"}}
                                 >
                                   Add
                                 </button>
@@ -836,7 +873,10 @@ export const UnifiedPlannerPage = () => {
                                     setActiveDay(null);
                                     setDayInput("");
                                   }}
-                                  className="px-3 text-xs text-gray-500 hover:bg-gray-100 rounded-xl transition-colors"
+                                  className="px-3 text-xs rounded-xl transition-colors"
+                                  style={{ color: "var(--text-muted)" }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "var(--accent-light)"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
                                 >
                                   Cancel
                                 </button>
@@ -845,7 +885,7 @@ export const UnifiedPlannerPage = () => {
                           ) : (
                             <button
                               onClick={() => setActiveDay(day.id)}
-                              className="w-full py-2 text-xs text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-xl border-2 border-dashed border-gray-200 hover:border-violet-300 flex items-center justify-center gap-1.5 transition-colors"
+                              className="w-full py-2 text-xs rounded-xl border-2 border-dashed flex items-center justify-center gap-1.5 transition-colors" style={{color:"var(--text-muted)",borderColor:"var(--card-border)"}}
                             >
                               <Plus size={13} /> Add task
                             </button>
