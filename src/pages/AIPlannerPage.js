@@ -79,11 +79,11 @@ function decimalToTime(hour) {
 }
 
 function priorityColor(p) {
-  return p === "high"
-    ? "bg-rose-50 text-rose-700 border border-rose-200"
-    : p === "low"
-    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-    : "bg-amber-50 text-amber-700 border border-amber-200";
+  if (p === "high")
+    return { background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" };
+  if (p === "low")
+    return { background: "rgba(52,211,153,0.15)", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)" };
+  return { background: "rgba(251,191,36,0.15)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)" };
 }
 
 function energyBarColor(score) {
@@ -596,35 +596,59 @@ export default function AIPlannerPage() {
    * task starting immediately after the previous one (+ 15-min buffer),
    * instead of applying a flat offset that leaves them all at the same time.
    */
-  function mergeSchedules(existingItems, newRawItems) {
-    if (!existingItems.length) {
-      // No existing tasks — rebuild from 9 AM sequentially
-      return buildSequentialSchedule(newRawItems, 9.0);
-    }
-
-    const nextSlot = findNextFreeSlot(existingItems);
-    const shiftedNew = buildSequentialSchedule(newRawItems, nextSlot);
-
-    const merged = [...existingItems, ...shiftedNew].sort(
-      (a, b) => itemStartDec(a) - itemStartDec(b)
-    );
-    return merged;
+  /** Get free windows from saved routine: [{start, end}] in decimal hours */
+  function getFreeWindowsFromRoutine() {
+    try {
+      const saved = localStorage.getItem("user-routine");
+      if (!saved) return null;
+      const r = JSON.parse(saved);
+      const wake  = toDecimal(r.wakeTime)  ?? 7.0;
+      const sleep = toDecimal(r.sleepTime) ?? 23.0;
+      if (!r.hasBusy || !r.busyStart || !r.busyEnd)
+        return [{ start: wake, end: sleep }];
+      const busyStart = toDecimal(r.busyStart);
+      const busyEnd   = toDecimal(r.busyEnd);
+      const windows = [];
+      if (wake < busyStart) windows.push({ start: wake,    end: busyStart });
+      if (busyEnd < sleep)  windows.push({ start: busyEnd, end: sleep     });
+      return windows.length ? windows : [{ start: wake, end: sleep }];
+    } catch { return null; }
   }
 
-  /**
-   * Lay tasks out sequentially starting at `fromDecimal`, each task placed
-   * right after the previous one with a 15-min buffer.
-   * This is the core fix — no flat offset, proper sequential placement.
-   */
-  function buildSequentialSchedule(rawItems, fromDecimal) {
-    let cursor = fromDecimal;
+  /** Advance cursor past any blocked slot it falls inside */
+  function skipBlockedSlots(cursor, freeWindows) {
+    if (!freeWindows) return cursor;
+    for (const w of freeWindows) {
+      if (cursor >= w.start && cursor < w.end) return cursor;
+    }
+    for (const w of freeWindows) {
+      if (w.start > cursor) return w.start;
+    }
+    return cursor;
+  }
+
+  function mergeSchedules(existingItems, newRawItems) {
+    const freeWindows  = getFreeWindowsFromRoutine();
+    const defaultStart = freeWindows ? freeWindows[0].start : 9.0;
+    if (!existingItems.length)
+      return buildSequentialSchedule(newRawItems, defaultStart, freeWindows);
+    const nextSlot   = findNextFreeSlot(existingItems);
+    const safeSlot   = skipBlockedSlots(nextSlot, freeWindows);
+    const shiftedNew = buildSequentialSchedule(newRawItems, safeSlot, freeWindows);
+    return [...existingItems, ...shiftedNew].sort((a, b) => itemStartDec(a) - itemStartDec(b));
+  }
+
+  /** Lay tasks sequentially from fromDecimal, jumping over blocked windows */
+  function buildSequentialSchedule(rawItems, fromDecimal, freeWindows) {
+    const windows = freeWindows ?? getFreeWindowsFromRoutine();
+    let cursor = skipBlockedSlots(fromDecimal, windows);
     return rawItems.map((item, idx) => {
-      const dur = item.duration || 1;
+      cursor         = skipBlockedSlots(cursor, windows);
       const startDec = cursor;
-      const endDec   = cursor + dur;
+      const endDec   = cursor + (item.duration || 1);
       const startStr = decimalToTime(startDec);
       const endStr   = decimalToTime(endDec);
-      cursor = endDec + 0.25; // 15-min buffer before next task
+      cursor = endDec + 0.25;
       return normaliseItem({
         ...item,
         start_time:  startDec,
@@ -656,8 +680,8 @@ export default function AIPlannerPage() {
             task_id:       t.id,
           })),
           date: selectedDate,
-          // Tell backend about existing schedule so it can find the free slot
           existing_schedule: schedule,
+          routine: (() => { try { const s = localStorage.getItem("user-routine"); return s ? JSON.parse(s) : null; } catch { return null; } })(),
         }),
       });
 
@@ -814,17 +838,28 @@ export default function AIPlannerPage() {
       return;
     }
 
+    // Sanitize: cap breaks to max 1 break per 90min of work, and max 4 total
+    function sanitizeBreaks(items) {
+      const workItems  = items.filter(i => !i.isBreak);
+      const maxBreaks  = Math.min(Math.ceil(workItems.length / 2), 4);
+      let breaksSeen   = 0;
+      return items.filter(item => {
+        if (!item.isBreak) return true;
+        breaksSeen++;
+        return breaksSeen <= maxBreaks;
+      });
+    }
+
     setSchedule(prevSchedule => {
       let merged;
 
       if (addIntent && prevSchedule.length > 0) {
-        // Legacy path: backend sent only new items, frontend must merge
         merged = mergeSchedules(prevSchedule, newSchedule);
       } else {
-        // Normal path: backend sent the complete schedule — just use it as-is.
-        // This covers: full new plan, add-task-with-backend-merge, optimised plan.
         merged = newSchedule.map((item, idx) => normaliseItem(item, idx));
       }
+
+      merged = sanitizeBreaks(merged);
 
       // Persist the final schedule immediately
       fetch(`${API}/api/daily-plans/update-schedule`, {
@@ -1035,14 +1070,14 @@ export default function AIPlannerPage() {
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-600 to-indigo-600
-                                flex items-center justify-center shadow-lg shadow-violet-200">
+                                flex items-center justify-center shadow-lg">
                   <Bot className="text-white" size={28} />
                 </div>
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900">
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight" style={{color:"var(--text-primary)"}}>
                     AI Productivity Planner
                   </h1>
-                  <p className="text-sm text-gray-500 mt-0.5 flex items-center gap-1.5">
+                  <p className="text-sm mt-0.5 flex items-center gap-1.5" style={{color:"var(--text-secondary)"}}>
                     <Sparkles size={13} className="text-violet-500" />
                     Intelligent scheduling, personalised to you
                   </p>
@@ -1054,7 +1089,7 @@ export default function AIPlannerPage() {
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(e.target.value)}
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white
+                  className="rounded-xl px-3 py-2 text-sm bg-white
                              shadow-sm focus:ring-2 focus:ring-violet-400 focus:border-transparent
                              text-gray-700 cursor-pointer"
                 />
@@ -1152,8 +1187,8 @@ export default function AIPlannerPage() {
                       {icon}
                     </div>
                     <div>
-                      <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{label}</p>
-                      <p className="text-2xl font-bold text-gray-800 leading-tight">{value}</p>
+                      <p className="text-xs font-medium uppercase tracking-wide" style={{color:"var(--text-muted)"}}>{label}</p>
+                      <p className="text-2xl font-bold leading-tight" style={{color:"var(--text-primary)"}}>{value}</p>
                     </div>
                   </div>
                 ))}
@@ -1163,11 +1198,11 @@ export default function AIPlannerPage() {
             <div className="space-y-6">
 
               {/* Schedule Timeline */}
-              <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="backdrop-blur-sm rounded-2xl shadow-sm overflow-hidden" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}>
                 <div className="flex items-center justify-between px-6 py-5 border-b border-gray-50">
                   <div className="flex items-center gap-2.5">
                     <Calendar size={20} className="text-violet-500" />
-                    <h2 className="font-semibold text-gray-800">
+                    <h2 className="font-semibold" style={{color:"var(--text-primary)"}}>
                       {isToday ? "Today's plan" : `Plan for ${selectedDate}`}
                     </h2>
                     {isToday && (
@@ -1209,8 +1244,8 @@ export default function AIPlannerPage() {
                                     justify-center mb-5 ring-8 ring-violet-50/50">
                       <Bot size={36} className="text-violet-400" />
                     </div>
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">No plan yet</h3>
-                    <p className="text-sm text-gray-400 max-w-xs mb-2">
+                    <h3 className="text-lg font-semibold mb-2" style={{color:"var(--text-primary)"}}>No plan yet</h3>
+                    <p className="text-sm max-w-xs mb-2" style={{color:"var(--text-muted)"}}>
                       Open the AI Assistant and describe your day. I'll build
                       a personalised schedule in seconds.
                     </p>
@@ -1329,30 +1364,32 @@ export default function AIPlannerPage() {
       {/* Task Completion Feedback Modal */}
       {showFeedbackModal && selectedTask && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl">
+          <div className="rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl" style={{background:"var(--card-bg)"}}>
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
                 <CheckCircle size={20} className="text-violet-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold">Task Completed! 🎉</h3>
-                <p className="text-xs text-gray-400">Help the AI learn from your data</p>
+                <h3 className="text-lg font-semibold" style={{color:"var(--text-primary)"}}>Task Completed! 🎉</h3>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>Help the AI learn from your data</p>
               </div>
             </div>
 
-            <div className="bg-gray-50 rounded-xl p-3 mb-4">
-              <p className="text-sm text-gray-600">
+            <div className="rounded-xl p-3 mb-4" style={{ background: "var(--accent-light)", border: "1px solid var(--divider)" }}>
+              <p className="text-sm" style={{ color: "var(--text-primary)" }}>
                 Task: <strong>{selectedTask.task}</strong>
               </p>
               <div className="flex items-center gap-3 mt-1">
-                <p className="text-xs text-gray-400">
-                  Planned: <span className="font-semibold text-gray-600">{selectedTask.duration}h</span>
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  Planned: <span className="font-semibold" style={{ color: "var(--text-secondary)" }}>{selectedTask.duration}h</span>
                 </p>
-                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${priorityColor(selectedTask.priority)}`}>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                      style={priorityColor(selectedTask.priority)}>
                   {selectedTask.priority}
                 </span>
                 {selectedTask.category && selectedTask.category !== "general" && (
-                  <span className="text-[10px] font-medium text-gray-500 bg-gray-200 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-medium px-2 py-0.5 rounded-full"
+                        style={{ color: "var(--text-muted)", background: "var(--accent-light)" }}>
                     {selectedTask.category}
                   </span>
                 )}
@@ -1426,13 +1463,13 @@ export default function AIPlannerPage() {
       {/* ── User Routine Modal ─────────────────────────────────────────────── */}
       {showRoutineModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-fade-in">
+          <div className="rounded-3xl shadow-2xl w-full max-w-md p-6 animate-fade-in" style={{background:"var(--card-bg)"}}>
             <div className="flex items-center justify-between mb-5">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
+                <h2 className="text-xl font-bold" style={{color:"var(--text-primary)"}}>
                   {isFirstTimeRoutine ? "Quick setup before we start! 🚀" : "My Daily Routine"}
                 </h2>
-                <p className="text-sm text-gray-500 mt-0.5">
+                <p className="text-sm mt-0.5" style={{color:"var(--text-secondary)"}}>
                   {isFirstTimeRoutine
                     ? "Tell the AI your hours so it schedules around your life"
                     : "AI will schedule tasks around your real hours"}
@@ -1448,7 +1485,7 @@ export default function AIPlannerPage() {
             <div className="space-y-4">
               {/* Occupation */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">I am a</label>
+                <label className="block text-sm font-medium mb-1.5" style={{color:"var(--text-primary)"}}>I am a</label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { value: "student", label: "🎓 Student" },
@@ -1459,7 +1496,11 @@ export default function AIPlannerPage() {
                     <button
                       key={opt.value}
                       onClick={() => setRoutine(r => ({ ...r, occupation: opt.value, busyLabel: opt.value === "student" ? "College" : opt.value === "professional" ? "Work" : opt.value === "freelancer" ? "Work" : "Busy" }))}
-                      className={`py-2.5 px-3 rounded-xl text-sm font-medium border transition-colors ${routine.occupation === opt.value ? "bg-violet-600 text-white border-violet-600" : "bg-gray-50 text-gray-700 border-gray-200 hover:border-violet-300"}`}
+                      className="py-2.5 px-3 rounded-xl text-sm font-medium border transition-colors"
+                      style={routine.occupation === opt.value
+                        ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }
+                        : { background: "var(--input-bg)", color: "var(--text-primary)", borderColor: "var(--card-border)" }
+                      }
                     >
                       {opt.label}
                     </button>
@@ -1470,14 +1511,14 @@ export default function AIPlannerPage() {
               {/* Wake / Sleep */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">🌅 Wake up</label>
+                  <label className="block text-sm font-medium mb-1.5" style={{color:"var(--text-primary)"}}>🌅 Wake up</label>
                   <input type="time" value={routine.wakeTime} onChange={e => setRoutine(r => ({ ...r, wakeTime: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                    className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">🌙 Sleep at</label>
+                  <label className="block text-sm font-medium mb-1.5" style={{color:"var(--text-primary)"}}>🌙 Sleep at</label>
                   <input type="time" value={routine.sleepTime} onChange={e => setRoutine(r => ({ ...r, sleepTime: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                    className="w-full rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}} />
                 </div>
               </div>
 
@@ -1499,12 +1540,12 @@ export default function AIPlannerPage() {
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">Start</label>
                       <input type="time" value={routine.busyStart} onChange={e => setRoutine(r => ({ ...r, busyStart: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                        className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}} />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">End</label>
                       <input type="time" value={routine.busyEnd} onChange={e => setRoutine(r => ({ ...r, busyEnd: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                        className="w-full rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2" style={{background:"var(--input-bg)",border:"1px solid var(--input-border)",color:"var(--text-primary)"}} />
                     </div>
                   </div>
                 )}
@@ -1929,12 +1970,12 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
         className="flex items-center gap-3 opacity-50 py-1"
       >
         <div className="w-36 flex-shrink-0 text-right pr-2">
-          <span className="text-xs text-gray-400 tabular-nums whitespace-nowrap">
+          <span className="text-xs tabular-nums whitespace-nowrap" style={{ color: "var(--text-muted)" }}>
             {item.timeDisplay}
           </span>
         </div>
-        <div className="w-2.5 h-2.5 rounded-full bg-gray-300 flex-shrink-0" />
-        <div className="flex items-center gap-1.5 text-xs text-gray-400 italic">
+        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: "var(--text-muted)" }} />
+        <div className="flex items-center gap-1.5 text-xs italic" style={{ color: "var(--text-muted)" }}>
           <Coffee size={12} /> {item.task}
         </div>
       </motion.div>
@@ -1953,9 +1994,8 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
       onMouseLeave={() => { setIsHovered(false); setConfirmDelete(false); }}
     >
       <div className="w-36 flex-shrink-0 text-right pr-2 pt-3.5">
-        <span className="inline-block text-[11px] font-semibold text-violet-600
-                         bg-violet-50 border border-violet-100 rounded-lg
-                         px-2 py-1 leading-tight tabular-nums whitespace-nowrap">
+        <span className="inline-block text-[11px] font-semibold rounded-lg px-2 py-1 leading-tight tabular-nums whitespace-nowrap"
+              style={{ color: "var(--accent)", background: "var(--accent-light)", border: "1px solid var(--divider)" }}>
           {item.timeDisplay}
         </span>
       </div>
@@ -1970,13 +2010,11 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
                            : "bg-violet-400 group-hover:bg-violet-600"}`} />
       </div>
 
-      <div className={`flex-1 min-w-0 border rounded-xl px-4 py-3.5 shadow-sm
-                       transition-all duration-200 relative
-                       ${completed
-                         ? "bg-emerald-50/60 border-emerald-200"
-                         : item.isExisting
-                         ? "bg-blue-50/60 border-blue-200"
-                         : "bg-white border-gray-100 hover:border-violet-100 hover:shadow-md"}`}>
+      <div className="flex-1 min-w-0 rounded-xl px-4 py-3.5 shadow-sm transition-all duration-200 relative"
+           style={{
+             background: completed ? "rgba(52,211,153,0.08)" : item.isExisting ? "rgba(96,165,250,0.08)" : "var(--card-bg)",
+             border: completed ? "1px solid rgba(52,211,153,0.25)" : item.isExisting ? "1px solid rgba(96,165,250,0.25)" : "1px solid var(--card-border)",
+           }}>
 
         <div className="flex items-start justify-between gap-2 mb-2">
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -1984,11 +2022,11 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
               type="checkbox"
               checked={completed}
               onChange={handleComplete}
-              className="w-4 h-4 rounded border-gray-300 text-emerald-600
-                         focus:ring-emerald-500 cursor-pointer flex-shrink-0"
+              className="w-4 h-4 rounded cursor-pointer flex-shrink-0"
+              style={{ accentColor: "var(--accent)" }}
             />
-            <h4 className={`font-semibold text-sm leading-snug
-                            ${completed ? "line-through text-gray-400" : "text-gray-800"}`}>
+            <h4 className={`font-semibold text-sm leading-snug ${completed ? "line-through" : ""}`}
+                style={{ color: completed ? "var(--text-muted)" : "var(--text-primary)" }}>
               {item.task}
             </h4>
             {item.isExisting && !completed && (
@@ -2008,12 +2046,10 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
                   exit={{ opacity: 0, scale: 0.5, width: 0 }}
                   transition={{ type: "spring", stiffness: 400, damping: 25 }}
                   onClick={handleDelete}
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-full
-                              text-[10px] font-medium transition-colors overflow-hidden
-                              ${confirmDelete
-                                ? "bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200"
-                                : "bg-gray-50 text-gray-400 border border-gray-200 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200"
-                              }`}
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors overflow-hidden"
+                  style={confirmDelete
+                    ? { background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.4)" }
+                    : { background: "var(--accent-light)", color: "var(--text-muted)", border: "1px solid var(--divider)" }}
                   title={confirmDelete ? "Click again to confirm" : "Delete task"}
                 >
                   <Trash2 size={11} />
@@ -2033,29 +2069,28 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
             <select
               value={priority}
               onChange={handlePriorityChange}
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border
-                          cursor-pointer transition-all
-                          ${priority === "high"
-                            ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
-                            : priority === "low"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                            : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"}`}
+              className="text-[10px] font-semibold px-2 py-0.5 rounded-full cursor-pointer transition-all"
+              style={(() => {
+                if (priority === "high")   return { background: "rgba(239,68,68,0.15)",  color: "#f87171", border: "1px solid rgba(239,68,68,0.3)"  };
+                if (priority === "low")    return { background: "rgba(52,211,153,0.15)", color: "#34d399", border: "1px solid rgba(52,211,153,0.3)" };
+                return { background: "rgba(251,191,36,0.15)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.3)" };
+              })()}
             >
-              <option value="high"   className="bg-white text-rose-700">🔥 High</option>
-              <option value="medium" className="bg-white text-amber-700">⚡ Medium</option>
-              <option value="low"    className="bg-white text-emerald-700">💤 Low</option>
+              <option value="high">🔥 High</option>
+              <option value="medium">⚡ Medium</option>
+              <option value="low">💤 Low</option>
             </select>
           </div>
         </div>
 
         <div className="flex items-center gap-4 flex-wrap ml-6">
-          <span className="flex items-center gap-1 text-xs text-gray-400">
+          <span className="flex items-center gap-1 text-xs" style={{ color: "var(--text-muted)" }}>
             <Clock size={11} /> {item.duration}h
           </span>
           {item.energyScore > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-300 uppercase tracking-wide font-medium">energy</span>
-              <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <span className="text-[10px] uppercase tracking-wide font-medium" style={{ color: "var(--text-muted)" }}>energy</span>
+              <div className="w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--divider)" }}>
                 <div
                   className={`h-full rounded-full ${energyBarColor(item.energyScore)} transition-all`}
                   style={{ width: `${Math.round(item.energyScore * 100)}%` }}
@@ -2064,13 +2099,13 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
             </div>
           )}
           {item.focusScore > 0 && (
-            <span className="flex items-center gap-1 text-[10px] text-gray-400">
+            <span className="flex items-center gap-1 text-[10px]" style={{ color: "var(--text-muted)" }}>
               <Brain size={10} /> {item.focusScore}/10
             </span>
           )}
           {item.category && item.category !== "general" && (
-            <span className="text-[9px] font-medium text-gray-400 bg-gray-100
-                             px-1.5 py-0.5 rounded-full capitalize">
+            <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full capitalize"
+                  style={{ color: "var(--text-muted)", background: "var(--accent-light)" }}>
               {item.category}
             </span>
           )}
@@ -2080,7 +2115,7 @@ function ScheduleRow({ item, onComplete, onPriorityChange, onDelete }) {
         {item.schedule_reason && !item.isBreak && (
           <div className="mt-2 ml-6 flex items-start gap-1.5">
             <span className="text-violet-400 text-[10px] mt-0.5 flex-shrink-0">✦</span>
-            <p className="text-[11px] text-violet-500 leading-snug italic">
+            <p className="text-[11px] leading-snug italic" style={{color:"var(--accent)"}}>
               {item.schedule_reason}
             </p>
           </div>
