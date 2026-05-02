@@ -51,6 +51,8 @@ export default function FloatingModeSwitcher() {
   const token = localStorage.getItem("token");
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(null);
+
+  if (!token) return null;
   const ref = useRef(null);
 
   // Close on outside click
@@ -70,8 +72,6 @@ export default function FloatingModeSwitcher() {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, []);
-
-  if (!token) return null;
 
   const currentTheme = themes[mode];
 
