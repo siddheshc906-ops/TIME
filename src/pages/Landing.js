@@ -7,7 +7,6 @@ import {
   Layout, BarChart3,
 } from "lucide-react";
 import BackgroundLayout from "../components/BackgroundLayout";
-import FloatingModeSwitcher from "../components/FloatingModeSwitcher";
 
 export const Landing = () => {
   const [wordIndex, setWordIndex] = useState(0);
@@ -91,9 +90,6 @@ export const Landing = () => {
         className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 to-indigo-500 z-50 origin-left"
         style={{ scaleX }}
       />
-
-      {/* Floating mode switcher */}
-      <FloatingModeSwitcher />
 
       <BackgroundLayout>
         {/* ── Hero ── */}
