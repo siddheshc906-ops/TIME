@@ -7,6 +7,7 @@ import {
   Layout, BarChart3,
 } from "lucide-react";
 import BackgroundLayout from "../components/BackgroundLayout";
+import FloatingModeSwitcher from "../components/FloatingModeSwitcher";
 
 export const Landing = () => {
   const [wordIndex, setWordIndex] = useState(0);
@@ -91,6 +92,9 @@ export const Landing = () => {
         style={{ scaleX }}
       />
 
+      {/* Floating mode switcher */}
+      <FloatingModeSwitcher />
+
       <BackgroundLayout>
         {/* ── Hero ── */}
         <section className="relative pt-20 pb-24 px-6 md:px-12 lg:px-24 overflow-hidden">
@@ -156,7 +160,7 @@ export const Landing = () => {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.2 }}
-              className="text-5xl md:text-7xl font-bold text-slate-900 mb-4 leading-tight"
+              className="text-5xl md:text-7xl font-bold mb-4 leading-tight" style={{color:"var(--text-primary)"}}
             >
               Your AI planner that{" "}
               <motion.span
@@ -179,7 +183,8 @@ export const Landing = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.35 }}
-              className="text-xl md:text-2xl text-slate-600 mb-3 font-medium"
+              className="text-xl md:text-2xl mb-3 font-medium"
+              style={{ color: "var(--text-secondary)" }}
             >
               Built for{" "}
               <AnimatePresence mode="wait">
@@ -189,70 +194,73 @@ export const Landing = () => {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="text-violet-600 font-semibold"
+                  style={{ color: "var(--accent)" }}
                 >
                   {rotatingWords[wordIndex]}
                 </motion.span>
               </AnimatePresence>
             </motion.div>
 
-            {/* Description */}
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.45 }}
-              className="text-base md:text-lg text-slate-500 mb-10 max-w-2xl mx-auto"
+              transition={{ duration: 0.6, delay: 0.5 }}
+              className="text-base md:text-lg max-w-2xl mx-auto mb-10"
+              style={{ color: "var(--text-secondary)" }}
             >
-              No manual planning. No guesswork. Timevora learns when your brain works best and schedules your tasks automatically — getting smarter every day.
+              No manual planning. No guesswork. Timevora learns when your brain works best
+              and schedules your tasks automatically — getting smarter every day.
             </motion.p>
 
-            {/* CTA Buttons */}
+            {/* CTA buttons */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.6 }}
-              className="flex flex-col sm:flex-row gap-4 justify-center"
+              transition={{ duration: 0.6, delay: 0.65 }}
+              className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-12"
             >
-              {/* Primary CTA with shimmer */}
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Link
-                  to={ctaLink}
-                  className="relative overflow-hidden inline-flex items-center gap-2 px-8 py-4 bg-violet-600 text-white rounded-full font-semibold shadow-lg shadow-violet-500/30 hover:bg-violet-700 transition-colors group"
-                >
-                  {/* Shimmer sweep on hover */}
-                  <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent group-hover:translate-x-full transition-transform duration-700" />
-                  Get Started Free <ArrowRight size={20} />
-                </Link>
-              </motion.div>
-
-              {/* Secondary CTA */}
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <a
-                  href="#features"
-                  className="inline-flex items-center gap-2 px-8 py-4 bg-white/80 backdrop-blur border border-gray-200 rounded-full font-semibold hover:bg-white hover:shadow-lg transition-all text-slate-700"
-                >
-                  See how it works →
-                </a>
-              </motion.div>
+              <motion.a
+                href={ctaLink}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.97 }}
+                className="px-8 py-4 rounded-full font-semibold text-white text-lg flex items-center gap-2 shadow-lg"
+                style={{ background: "var(--accent)" }}
+              >
+                Get Started Free <ArrowRight size={20} />
+              </motion.a>
+              <motion.a
+                href="#features"
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                className="px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-2"
+                style={{
+                  background: "var(--card-bg)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--card-border)",
+                }}
+              >
+                See how it works →
+              </motion.a>
             </motion.div>
 
-            {/* Trust pills — honest, no fake stats */}
+            {/* Trust badges */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: 0.9 }}
-              className="flex flex-wrap justify-center gap-3 mt-10"
+              transition={{ duration: 0.6, delay: 0.8 }}
+              className="flex flex-wrap justify-center gap-3"
             >
-              {[
-                "✓ Free during beta",
-                "✓ You’re good, no charge until you love it",
-                "✓ Built by a student, for students",
-              ].map((pill) => (
+              {["✓ Free during beta", "✓ You're good, no charge until you love it", "✓ Built by a student, for students"].map((badge) => (
                 <span
-                  key={pill}
-                  className="px-4 py-1.5 bg-white/70 backdrop-blur border border-violet-100 rounded-full text-sm text-slate-600 font-medium"
+                  key={badge}
+                  className="px-4 py-2 rounded-full text-sm font-medium"
+                  style={{
+                    background: "var(--card-bg)",
+                    color: "var(--text-secondary)",
+                    border: "1px solid var(--card-border)",
+                  }}
                 >
-                  {pill}
+                  {badge}
                 </span>
               ))}
             </motion.div>
@@ -260,26 +268,21 @@ export const Landing = () => {
         </section>
 
         {/* ── Features ── */}
-        <section id="features" className="py-20 px-6 md:px-12 lg:px-24 relative overflow-hidden">
-          <div className="absolute inset-0 opacity-5">
-            <div className="absolute top-0 left-0 w-96 h-96 bg-gradient-to-r from-violet-500 to-indigo-500 rounded-full blur-3xl" />
-            <div className="absolute bottom-0 right-0 w-96 h-96 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full blur-3xl" />
-          </div>
-
-          <div className="max-w-7xl mx-auto">
+        <section id="features" className="py-20 px-6 md:px-12 lg:px-24">
+          <div className="max-w-6xl mx-auto">
             <motion.div
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.6 }}
-              className="text-center mb-12"
+              className="text-center mb-14"
             >
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-                Everything you need to stay{" "}
-                <span className="text-violet-600">productive</span>
+              <h2 className="text-4xl md:text-5xl font-bold mb-4" style={{ color: "var(--text-primary)" }}>
+                Everything you need to{" "}
+                <span style={{ color: "var(--accent)" }}>own your time</span>
               </h2>
-              <p className="text-slate-600 max-w-2xl mx-auto">
-                Four powerful tools, one place. Designed around how your brain actually works.
+              <p className="text-lg max-w-xl mx-auto" style={{ color: "var(--text-secondary)" }}>
+                Four powerful tools. One focused workspace.
               </p>
             </motion.div>
 
@@ -333,11 +336,11 @@ export const Landing = () => {
                           />
                         </div>
 
-                        <div className="p-6 bg-white/90 backdrop-blur-sm">
-                          <h3 className="text-2xl font-semibold mb-2 group-hover:text-violet-600 transition-colors">
+                        <div className="p-6 backdrop-blur-sm" style={{background:"var(--card-bg)"}}>
+                          <h3 className="text-2xl font-semibold mb-2 transition-colors" style={{color:"var(--text-primary)"}}>
                             {feature.title}
                           </h3>
-                          <p className="text-slate-600 mb-4">{feature.description}</p>
+                          <p className="mb-4" style={{color:"var(--text-secondary)"}}>{feature.description}</p>
                           <motion.span
                             className="inline-flex items-center gap-1 text-violet-600 font-medium group-hover:gap-2 transition-all"
                             whileHover={{ x: 5 }}
@@ -441,12 +444,12 @@ export const Landing = () => {
           >
             Tv
           </motion.div>
-          <span className="text-xl font-bold bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+          <span className="text-xl font-bold" style={{color:"var(--accent)"}}>
             Timevora
           </span>
         </div>
 
-        <p className="text-slate-400 text-sm mb-1">
+        <p className="text-sm mb-1" style={{color:"var(--text-muted)"}}>
           © 2026 Timevora. Built with{" "}
           <motion.span
             animate={{ scale: [1, 1.2, 1] }}
@@ -457,7 +460,7 @@ export const Landing = () => {
           </motion.span>{" "}
           for productivity.
         </p>
-        <p className="text-slate-400 text-xs">
+        <p className="text-xs" style={{color:"var(--text-muted)"}}>
           Free during beta
         </p>
       </motion.footer>
