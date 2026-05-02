@@ -48,8 +48,11 @@ function ModeRing({ color, active }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function FloatingModeSwitcher() {
   const { mode, setMode, themes } = useMode();
+  const token = localStorage.getItem("token");
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(null);
+
+  if (!token) return null;
   const ref = useRef(null);
 
   // Close on outside click
