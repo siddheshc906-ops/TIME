@@ -122,6 +122,26 @@ TASK_BUFFER = 0.25   # 15 min
 # ── Break threshold: gaps larger than this get a labelled break block ─────────
 BREAK_THRESHOLD = 0.5   # 30 min
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Scientific daily boundary buffers
+# ══════════════════════════════════════════════════════════════════════════════
+# After waking up, a person needs time for morning routine (brush, bath,
+# breakfast) before any cognitive task can begin.
+MORNING_ROUTINE_BUFFER = 1.0      # 60 min reserved after wake-up
+
+# Before sleep, screens and stimulating tasks harm sleep quality.
+# The last 30 min before bedtime must stay free.
+PRE_SLEEP_BUFFER = 0.5            # 30 min reserved before sleep
+
+# After every 90 min of continuous focused work, the ultradian rest phase
+# demands a break (Kleitman's Basic Rest-Activity Cycle).
+ULTRADIAN_CYCLE = 1.5             # 90 min of work triggers a break
+SHORT_BREAK_DURATION = 0.25       # 15 min break after ≤90 min work
+LONG_BREAK_DURATION  = 0.5        # 30 min break after 3+ hours of work
+
+# Minimum break between ANY two consecutive tasks (transition time)
+MIN_TASK_TRANSITION = 0.25        # 15 min always inserted between tasks
+
 
 class IntelligentScheduler:
     def __init__(self, user_id: str, db):
@@ -152,7 +172,7 @@ class IntelligentScheduler:
               "energy_aligned":    float,         # 0-1 alignment score
             }
         """
-        prefs = preferences or {}
+        prefs = dict(preferences or {})
 
         if not tasks:
             return {
@@ -165,6 +185,31 @@ class IntelligentScheduler:
         # ── Priority 2 + 5: Load user accuracy + chronotype before scheduling ──
         await self._load_user_context()
 
+        # ── ROUTINE FIX: merge saved routine from DB into prefs so
+        # _determine_day_start and _place_tasks respect wake/sleep/college times.
+        # Frontend prefs may be empty — DB is the single source of truth.
+        try:
+            routine_doc = await self.db.user_day_context.find_one({"user_id": self.user_id})
+            if routine_doc and routine_doc.get("has_custom"):
+                wake_up       = routine_doc.get("wake_up", 7.0)
+                day_end       = routine_doc.get("day_end", 23.0)
+                college_start = routine_doc.get("college_start")
+                college_end   = routine_doc.get("college_end")
+                prefs.setdefault("wake_up", wake_up)
+                prefs.setdefault("sleep",   day_end)
+                if college_start is not None and college_end is not None:
+                    prefs.setdefault("blocked_windows", [
+                        {"start": college_start, "end": college_end,
+                         "label": routine_doc.get("college_label", "college")}
+                    ])
+                logger.info(
+                    f"Routine loaded for user {self.user_id}: "
+                    f"wake={wake_up}, sleep={day_end}, "
+                    f"college={college_start}-{college_end}"
+                )
+        except Exception as _re:
+            logger.warning(f"Could not load routine from DB: {_re}")
+
         # 1. Enrich each task with analysis metadata
         analyzed = await self._analyze_tasks(tasks)
 
@@ -174,13 +219,18 @@ class IntelligentScheduler:
         # 3. Determine the day-start from preferences, chronotype, or default
         day_start = self._determine_day_start(prefs)
 
-        # 4. Place tasks into time slots
-        schedule = await self._place_tasks(analyzed, energy_curve, day_start)
+        # 4. Determine the hard day-end (pre-sleep buffer applied)
+        raw_day_end = float(prefs.get("sleep", prefs.get("day_end", DAY_END)))
+        effective_day_end = raw_day_end - PRE_SLEEP_BUFFER  # last task must end 30 min before sleep
 
-        # 5. Insert break / buffer blocks in visible gaps
-        schedule = self._insert_breaks(schedule)
+        # 5. Place tasks into time slots
+        blocked_windows = prefs.get("blocked_windows", [])
+        schedule = await self._place_tasks(analyzed, energy_curve, day_start, effective_day_end, blocked_windows)
 
-        # 6. Generate textual insights
+        # 6. Insert scientifically-spaced break / buffer blocks
+        schedule = self._insert_breaks(schedule, day_start, raw_day_end)
+
+        # 7. Generate textual insights
         insights = self._generate_insights(schedule, analyzed, energy_curve)
 
         return {
@@ -349,23 +399,38 @@ class IntelligentScheduler:
         1. Explicit user preference (highest priority)
         2. Chronotype-based default
         3. Fallback to 9 AM
-        """
-        # User explicitly set a start time
-        if prefs.get("day_start") is not None:
-            return float(prefs["day_start"])
 
-        # ── Priority 5: Chronotype-based start ──
+        SCIENTIFIC RULE: Always add MORNING_ROUTINE_BUFFER after wake-up.
+        If wake_up=7.0, the earliest a task can start is 8:00 AM (60 min
+        reserved for brushing, bathing, breakfast — shown as 'Morning Routine' block).
+        """
+        wake_up = prefs.get("wake_up")  # raw wake-up hour from routine
+
+        # User explicitly set a task start time (overrides everything)
+        if prefs.get("day_start") is not None:
+            raw = float(prefs["day_start"])
+            # Even if they set day_start, enforce morning buffer relative to wake_up
+            if wake_up is not None:
+                earliest = float(wake_up) + MORNING_ROUTINE_BUFFER
+                return max(raw, earliest)
+            return raw
+
+        # If wake_up is provided via prefs (from saved routine), apply buffer
+        if wake_up is not None:
+            return round(float(wake_up) + MORNING_ROUTINE_BUFFER, 2)
+
+        # ── Priority 5: Chronotype-based start (already post-morning-routine) ──
         chronotype_starts = {
-            "morning":   7.0,   # Morning Lions start early
-            "afternoon": 9.0,   # Afternoon Wolves start normally
-            "evening":   10.0,  # Night Owls start later
-            "night":     11.0,  # Midnight Phoenixes start late
+            "morning":   8.0,   # wake ~7, tasks from 8 AM
+            "afternoon": 9.0,   # wake ~8, tasks from 9 AM
+            "evening":   10.0,  # wake ~9, tasks from 10 AM
+            "night":     11.0,  # wake ~10, tasks from 11 AM
         }
 
         if self._chronotype_slot and self._chronotype_slot in chronotype_starts:
             return chronotype_starts[self._chronotype_slot]
 
-        return 9.0  # default
+        return 9.0  # default (assumes 8 AM wake + 1h buffer)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Task analysis (existing — enhanced with accuracy adjustment)
@@ -523,48 +588,77 @@ class IntelligentScheduler:
 
     async def _place_tasks(
         self,
-        tasks:        List[Dict],
-        energy_curve: List[float],
-        day_start:    float,
+        tasks:            List[Dict],
+        energy_curve:     List[float],
+        day_start:        float,
+        effective_day_end: float = DAY_END,
+        blocked_windows:  List[Dict] = None,
     ) -> List[Dict]:
         """
         Two-pass greedy scheduler:
           Pass 1 – place fixed-time tasks (tasks with start_time set)
           Pass 2 – place remaining tasks in the best available energy slot
+
+        Scientific boundaries respected:
+          - day_start already has morning routine buffer applied
+          - effective_day_end = sleep_time − 30 min pre-sleep buffer
         """
         fixed    = [t for t in tasks if t.get("start_time") is not None]
         flexible = [t for t in tasks if t.get("start_time") is None]
 
         schedule: List[Dict] = []
 
+        # ── ROUTINE FIX: pre-populate schedule with blocked window sentinels
+        # (e.g. college 9-17) so _slot_is_free automatically rejects those slots.
+        for bw in (blocked_windows or []):
+            bw_start = float(bw.get("start", 0))
+            bw_end   = float(bw.get("end",   0))
+            if bw_end > bw_start:
+                schedule.append({
+                    "task":       f"🚫 {bw.get('label', 'Blocked')}",
+                    "start_time": bw_start,
+                    "end_time":   bw_end,
+                    "duration":   bw_end - bw_start,
+                    "type":       "blocked",
+                    "priority":   "high",
+                    "focus_score": 0,
+                })
+                logger.info(f"Blocked window registered: {bw.get('label')} {bw_start}-{bw_end}")
+
         # ── Pass 1: fixed-time tasks ──────────────────────────────────────────
         for task in sorted(fixed, key=lambda t: t["start_time"]):
             start    = float(task["start_time"])
             duration = task.get("duration", 1.0)
             end      = task.get("end_time", start + duration)
-            schedule.append(self._make_slot(task, start, end))
+            # Clamp to valid window
+            if end <= effective_day_end:
+                schedule.append(self._make_slot(task, start, end))
 
         # ── Pass 2: flexible tasks ────────────────────────────────────────────
-        # Priority 5: Sort order depends on whether we're in peak window
         flexible = self._sort_flexible_tasks(flexible, day_start)
 
         for task in flexible:
             slot = self._find_best_slot(
-                task, day_start, energy_curve, schedule
+                task, day_start, energy_curve, schedule, effective_day_end
             )
             if slot:
                 schedule.append(slot)
             else:
-                # Last resort: append after the latest task
+                # Last resort: append after the latest task (if still within window)
                 end_of_schedule = max(
                     (s["end_time"] for s in schedule), default=day_start
                 )
-                dur = task.get("duration", 1.0)
-                schedule.append(
-                    self._make_slot(task, end_of_schedule + TASK_BUFFER,
-                                    end_of_schedule + TASK_BUFFER + dur)
-                )
+                dur  = task.get("duration", 1.0)
+                start = end_of_schedule + MIN_TASK_TRANSITION
+                end   = start + dur
+                if end <= effective_day_end:
+                    schedule.append(
+                        self._make_slot(task, start, end)
+                    )
 
+        # Remove blocked-window sentinels — they were only needed to block slots.
+        # _insert_breaks will add the proper Morning Routine / Wind-down blocks.
+        schedule = [s for s in schedule if s.get("type") != "blocked"]
         schedule.sort(key=lambda s: s["start_time"])
         return schedule
 
@@ -617,16 +711,20 @@ class IntelligentScheduler:
 
     def _find_best_slot(
         self,
-        task:         Dict,
-        day_start:    float,
-        energy_curve: List[float],
-        existing:     List[Dict],
+        task:              Dict,
+        day_start:         float,
+        energy_curve:      List[float],
+        existing:          List[Dict],
+        effective_day_end: float = DAY_END,
     ) -> Optional[Dict]:
         """
-        Score every candidate hour between day_start and DAY_END.
+        Score every candidate hour between day_start and effective_day_end.
         Score = energy_at_hour × (focus_required / 10)
         Bonus: aligns task with its personal optimal_time window.
         Returns the highest-scoring available slot.
+
+        effective_day_end = sleep_time − PRE_SLEEP_BUFFER, so no task
+        is placed inside the 30-min wind-down window before bed.
         """
         duration     = task.get("duration", 1.0)
         focus_needed = task.get("focus_required", 5)
@@ -637,7 +735,7 @@ class IntelligentScheduler:
 
         # Step through candidate starts at 15-min resolution
         candidate = day_start
-        while candidate + duration <= DAY_END:
+        while candidate + duration <= effective_day_end:
             if self._slot_is_free(candidate, duration, existing):
                 energy = self._energy_at(candidate, energy_curve)
                 score  = energy * (focus_needed / 10.0)
@@ -649,7 +747,6 @@ class IntelligentScheduler:
                     score += proximity_bonus
 
                 # ── Priority 5: Chronotype alignment bonus ──
-                # Extra bonus when placing hard tasks during peak slot
                 if self._chronotype_slot and task.get("difficulty") == "hard":
                     chrono_bonus = self._chronotype_alignment_bonus(
                         candidate, self._chronotype_slot
@@ -818,17 +915,88 @@ class IntelligentScheduler:
     # Break insertion (existing — preserved exactly)
     # ══════════════════════════════════════════════════════════════════════════
 
-    def _insert_breaks(self, schedule: List[Dict]) -> List[Dict]:
+    def _insert_breaks(
+        self,
+        schedule:    List[Dict],
+        day_start:   float = DAY_START,
+        sleep_time:  float = DAY_END,
+    ) -> List[Dict]:
         """
-        Walk through the schedule and insert labelled break blocks
-        wherever consecutive tasks have a gap > BREAK_THRESHOLD.
+        Scientifically-aware break insertion:
+
+        1. Morning Routine block  — first block of the day from wake-up to
+           day_start (MORNING_ROUTINE_BUFFER = 60 min).  Shown as
+           '🌅 Morning Routine' so the user sees why that slot is reserved.
+
+        2. Pre-sleep Wind-down    — last block before sleep
+           (PRE_SLEEP_BUFFER = 30 min).  Shown as '😴 Wind-down & Sleep Prep'.
+
+        3. Ultradian breaks       — after every ~90 min of continuous work,
+           a 15-min break is inserted (Short Break).  After 3+ hours of
+           accumulated work, a 30-min break is inserted (Long Break).
+
+        4. Gap labelling          — any remaining gap ≥ BREAK_THRESHOLD
+           between tasks is labelled '☕ Break'.
         """
         if not schedule:
             return []
 
         result: List[Dict] = []
+
+        # ── 1. Morning Routine block ──────────────────────────────────────────
+        wake_time = day_start - MORNING_ROUTINE_BUFFER
+        if wake_time >= DAY_START - MORNING_ROUTINE_BUFFER and wake_time < day_start:
+            result.append({
+                "task":       "🌅 Morning Routine",
+                "start_time": round(wake_time, 2),
+                "end_time":   round(day_start, 2),
+                "duration":   round(MORNING_ROUTINE_BUFFER, 2),
+                "type":       "routine",
+                "priority":   "high",
+                "focus_score": 0,
+                "note":       "Reserved for brushing, bathing, breakfast",
+            })
+
+        # ── 2. Build task + ultradian-break sequence ──────────────────────────
+        accumulated_work = 0.0   # hours of continuous work since last break
+
         for i, task in enumerate(schedule):
+            # Before appending this task, check if we've hit an ultradian limit
+            task_duration = task.get("duration", 0)
+
+            # Decide break size based on accumulated work
+            if accumulated_work >= ULTRADIAN_CYCLE:
+                break_dur  = LONG_BREAK_DURATION if accumulated_work >= 3.0 else SHORT_BREAK_DURATION
+                break_label = "🧘 Long Break (Rest your eyes & stretch)" if accumulated_work >= 3.0 \
+                              else "☕ Short Break (5–15 min rest recommended)"
+                # Place the break in the gap before this task
+                prev_end = result[-1]["end_time"] if result else day_start
+                gap = task["start_time"] - prev_end
+                if gap < break_dur:
+                    # Not enough gap — insert a note inside the task itself
+                    task = {**task, "break_due": True}
+                else:
+                    break_start = prev_end
+                    break_end   = break_start + break_dur
+                    if break_end <= task["start_time"]:
+                        result.append({
+                            "task":       break_label,
+                            "start_time": round(break_start, 2),
+                            "end_time":   round(break_end, 2),
+                            "duration":   round(break_dur, 2),
+                            "type":       "break",
+                            "priority":   "low",
+                            "focus_score": 0,
+                        })
+                accumulated_work = 0.0   # reset counter
+
             result.append(task)
+
+            # Accumulate only real work blocks
+            if task.get("type") != "break":
+                accumulated_work += task_duration
+
+            # ── 3. Gap labelling between this task and the next ──────────────
             if i < len(schedule) - 1:
                 gap = schedule[i + 1]["start_time"] - task["end_time"]
                 if gap >= BREAK_THRESHOLD:
@@ -841,6 +1009,34 @@ class IntelligentScheduler:
                         "priority":   "low",
                         "focus_score": 0,
                     })
+
+        # ── 4. Pre-sleep Wind-down block ──────────────────────────────────────
+        wind_down_start = sleep_time - PRE_SLEEP_BUFFER
+        last_task_end   = result[-1]["end_time"] if result else day_start
+        if last_task_end <= wind_down_start:
+            # Gap between last task and wind-down: label as break if large enough
+            gap = wind_down_start - last_task_end
+            if gap >= BREAK_THRESHOLD:
+                result.append({
+                    "task":       "☕ Break",
+                    "start_time": round(last_task_end, 2),
+                    "end_time":   round(wind_down_start, 2),
+                    "duration":   round(gap, 2),
+                    "type":       "break",
+                    "priority":   "low",
+                    "focus_score": 0,
+                })
+            result.append({
+                "task":       "😴 Wind-down & Sleep Prep",
+                "start_time": round(wind_down_start, 2),
+                "end_time":   round(sleep_time, 2),
+                "duration":   round(PRE_SLEEP_BUFFER, 2),
+                "type":       "routine",
+                "priority":   "high",
+                "focus_score": 0,
+                "note":       "No screens, no stimulating tasks — prep for quality sleep",
+            })
+
         return result
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -934,6 +1130,12 @@ class IntelligentScheduler:
                     f"⚡ Schedule optimized for your {chrono_name} rhythm — "
                     "hard tasks placed during your peak energy window."
                 )
+
+        # Scientific buffer reminder
+        insights.append(
+            "🌅 60 min reserved after wake-up for your morning routine. "
+            "😴 30 min before sleep kept clear for wind-down — this protects your sleep quality."
+        )
 
         return insights[:6]  # cap at 6
 
