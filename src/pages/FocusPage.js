@@ -666,7 +666,7 @@ export const FocusPage = () => {
                     whileHover={{ scale: 1.05 }}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => setShowBgSelector(!showBgSelector)}
-                    className={`relative px-4 py-2 bg-white/90 backdrop-blur rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2 border ${
+                    className={`relative px-4 py-2 backdrop-blur rounded-lg shadow-md hover:shadow-lg transition-all duration-300 flex items-center gap-2 ${
                       showBgSelector ? 'border-violet-400' : 'border-white/20'
                     }`}
                   >
@@ -688,18 +688,18 @@ export const FocusPage = () => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -10, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
-                    className="mb-6 bg-white/95 backdrop-blur-xl rounded-xl shadow-2xl border border-gray-100 overflow-hidden"
+                    className="mb-6 backdrop-blur-xl rounded-xl shadow-2xl overflow-hidden" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                   >
                     {/* Panel Header */}
-                    <div className="px-5 py-4 border-b border-gray-100">
+                    <div className="px-5 py-4" style={{borderBottom:"1px solid var(--card-border)"}}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="p-2 bg-violet-50 rounded-lg">
                             <Layers size={18} className="text-violet-600" />
                           </div>
                           <div>
-                            <h3 className="font-semibold text-gray-800">Choose Your Ambiance</h3>
-                            <p className="text-xs text-gray-500 mt-0.5">Select a background that matches your mood</p>
+                            <h3 className="font-semibold" style={{color:"var(--text-primary)"}}>Choose Your Ambiance</h3>
+                            <p className="text-xs mt-0.5" style={{color:"var(--text-secondary)"}}>Select a background that matches your mood</p>
                           </div>
                         </div>
                         <motion.button
@@ -802,7 +802,7 @@ export const FocusPage = () => {
                   initial="initial"
                   animate="animate"
                   exit="exit"
-                  className="bg-white/80 backdrop-blur rounded-3xl p-8 shadow-2xl border border-white/50"
+                  className="backdrop-blur rounded-3xl p-8 shadow-2xl" style={{background:"var(--card-bg)",border:"1px solid var(--card-border)"}}
                 >
                   <div className="space-y-6">
                     {/* Motivational Message */}
@@ -823,14 +823,14 @@ export const FocusPage = () => {
                       <div className="inline-flex items-center justify-center gap-3 mb-3">
                         <MessageIcon className={`text-${selectedBg.color}-600`} size={32} />
                       </div>
-                      <h2 className="text-2xl font-semibold text-gray-800 mb-2">
+                      <h2 className="text-2xl font-semibold mb-2" style={{color:"var(--text-primary)"}}>
                         {randomMessage.message}
                       </h2>
                       <motion.p 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.5 }}
-                        className="text-gray-500 text-sm"
+                        className="text-sm" style={{color:"var(--text-secondary)"}}
                       >
                         {sessions} sessions completed today
                       </motion.p>
@@ -843,7 +843,7 @@ export const FocusPage = () => {
                       transition={{ delay: 0.3, type: "spring" }}
                       className={`bg-gradient-to-br from-${selectedBg.color}-50 to-${selectedBg.color}-50/50 p-6 rounded-2xl border-2 border-${selectedBg.color}-200`}
                     >
-                      <h3 className="font-semibold text-center mb-4 text-gray-700">
+                      <h3 className="font-semibold text-center mb-4" style={{color:"var(--text-primary)"}}>
                         Set Your Focus Time
                       </h3>
                       
@@ -1005,7 +1005,7 @@ export const FocusPage = () => {
                       </motion.button>
 
                       {/* Mini timer digits */}
-                      <span className="text-xl font-bold font-mono text-gray-800 tracking-wider">
+                      <span className="text-xl font-bold font-mono tracking-wider" style={{color:"var(--text-primary)"}}>
                         {timeDisplay.minutes}:{timeDisplay.seconds}
                       </span>
 
@@ -1051,11 +1051,11 @@ export const FocusPage = () => {
                     >
                       <div className="text-center">
                         <div className="flex items-center justify-center">
-                          <span className="text-8xl font-bold text-gray-800 font-mono tracking-wider">
+                          <span className="text-8xl font-bold font-mono tracking-wider" style={{color:"var(--text-primary)"}}>
                             {timeDisplay.minutes}
                           </span>
-                          <span className="text-6xl text-gray-600 mx-1">:</span>
-                          <span className="text-8xl font-bold text-gray-800 font-mono tracking-wider">
+                          <span className="text-6xl mx-1" style={{color:"var(--text-secondary)"}}>:</span>
+                          <span className="text-8xl font-bold font-mono tracking-wider" style={{color:"var(--text-primary)"}}>
                             {timeDisplay.seconds}
                           </span>
                         </div>
