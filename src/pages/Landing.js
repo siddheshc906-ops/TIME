@@ -17,6 +17,10 @@ export const Landing = () => {
 
   const rotatingWords = ["students.", "developers.", "founders.", "you."];
 
+  // Check if user is already logged in
+  const isLoggedIn = !!localStorage.getItem("token");
+  const ctaLink = isLoggedIn ? "/tasks" : "/signup";
+
   // Typewriter word rotation
   useEffect(() => {
     const interval = setInterval(() => {
@@ -211,7 +215,7 @@ export const Landing = () => {
               {/* Primary CTA with shimmer */}
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Link
-                  to="/signup"
+                  to={ctaLink}
                   className="relative overflow-hidden inline-flex items-center gap-2 px-8 py-4 bg-violet-600 text-white rounded-full font-semibold shadow-lg shadow-violet-500/30 hover:bg-violet-700 transition-colors group"
                 >
                   {/* Shimmer sweep on hover */}
@@ -403,7 +407,7 @@ export const Landing = () => {
 
               <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                 <Link
-                  to="/signup"
+                  to={ctaLink}
                   className="inline-flex items-center gap-2 bg-white text-violet-600 px-8 py-4 rounded-full font-semibold hover:shadow-xl transition-all"
                 >
                   Start free  <ArrowRight size={20} />
