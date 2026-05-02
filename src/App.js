@@ -1,20 +1,26 @@
+// src/App.js
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
-import { Navigation } from "./components/Navigation";
-import ErrorBoundary from "./components/ErrorBoundary";
+import { ModeProvider, useMode } from "./context/ModeContext";
+import { Navigation }            from "./components/Navigation";
+import ErrorBoundary             from "./components/ErrorBoundary";
 
-import { Landing } from "./pages/Landing";
-import { FocusPage } from "./pages/FocusPage";
-import { AnalyzerPage } from "./pages/AnalyzerPage";
-import PerformancePage from "./pages/PerformancePage";
-import AIPlannerPage from "./pages/AIPlannerPage";
-import LoginPage from "./pages/LoginPage";
-import SignupPage from "./pages/SignupPage";
+import { Landing }            from "./pages/Landing";
+import { FocusPage }          from "./pages/FocusPage";
+import { AnalyzerPage }       from "./pages/AnalyzerPage";
+import PerformancePage        from "./pages/PerformancePage";
+import AIPlannerPage          from "./pages/AIPlannerPage";
+import LoginPage              from "./pages/LoginPage";
+import SignupPage             from "./pages/SignupPage";
 import { UnifiedPlannerPage } from "./pages/UnifiedPlannerPage";
-import { captureOAuthToken } from "./api/auth";
+import { captureOAuthToken }  from "./api/auth";
 
+// ─────────────────────────────────────────────
+// Auth guard
+// ─────────────────────────────────────────────
 function ProtectedRoute({ children }) {
   const token = localStorage.getItem("token");
 
@@ -22,7 +28,7 @@ function ProtectedRoute({ children }) {
 
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    if (Date.now() > (payload.exp * 1000) + 60000) {
+    if (Date.now() > payload.exp * 1000) {
       localStorage.removeItem("token");
       return <Navigate to="/login" />;
     }
@@ -33,7 +39,12 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-function App() {
+// ─────────────────────────────────────────────
+// Inner app — needs access to ModeContext for AnimatePresence key
+// ─────────────────────────────────────────────
+function AppInner() {
+  const { mode } = useMode();
+
   useEffect(() => {
     captureOAuthToken();
   }, []);
@@ -43,74 +54,96 @@ function App() {
       <BrowserRouter>
         <Navigation />
 
-        <Routes>
-          {/* Public routes */}
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
+        {/* Fade the entire route tree in/out on mode switch */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={mode}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+          >
+            <Routes>
+              {/* Public */}
+              <Route path="/"       element={<Landing />} />
+              <Route path="/login"  element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
 
-          {/* Redirects for old routes */}
-          <Route path="/todo"      element={<Navigate to="/tasks"      replace />} />
-          <Route path="/planner"   element={<Navigate to="/tasks"      replace />} />
-          <Route path="/dashboard" element={<Navigate to="/tasks"      replace />} />
-          <Route path="/analyzer"  element={<Navigate to="/ai-planner" replace />} />
-          <Route path="/about"     element={<Navigate to="/"           replace />} />
+              {/* Redirects for old routes */}
+              <Route path="/todo"      element={<Navigate to="/tasks"      replace />} />
+              <Route path="/planner"   element={<Navigate to="/tasks"      replace />} />
+              <Route path="/dashboard" element={<Navigate to="/tasks"      replace />} />
+              <Route path="/analyzer"  element={<Navigate to="/ai-planner" replace />} />
+              <Route path="/about"     element={<Navigate to="/"           replace />} />
 
-          {/* Protected routes */}
-          <Route
-            path="/tasks"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><UnifiedPlannerPage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/focus"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><FocusPage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-planner"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><AIPlannerPage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/analytics"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><PerformancePage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/performance"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><PerformancePage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/unified-planner"
-            element={
-              <ProtectedRoute>
-                <ErrorBoundary><UnifiedPlannerPage /></ErrorBoundary>
-              </ProtectedRoute>
-            }
-          />
+              {/* Protected */}
+              <Route
+                path="/tasks"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><UnifiedPlannerPage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/focus"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><FocusPage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/ai-planner"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><AIPlannerPage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/analytics"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><PerformancePage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/performance"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><PerformancePage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/unified-planner"
+                element={
+                  <ProtectedRoute>
+                    <ErrorBoundary><UnifiedPlannerPage /></ErrorBoundary>
+                  </ProtectedRoute>
+                }
+              />
 
-          {/* 404 */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+              {/* 404 */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </motion.div>
+        </AnimatePresence>
       </BrowserRouter>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Root — ModeProvider wraps everything
+// ─────────────────────────────────────────────
+function App() {
+  return (
+    <ModeProvider>
+      <AppInner />
+    </ModeProvider>
   );
 }
 
