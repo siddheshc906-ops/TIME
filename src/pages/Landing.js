@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { motion, useScroll, useTransform, useSpring, AnimatePresence } from "framer-motion";
 import { 
@@ -20,6 +20,7 @@ export const Landing = () => {
   // Check if user is already logged in
   const isLoggedIn = !!localStorage.getItem("token");
   const ctaLink = isLoggedIn ? "/tasks" : "/signup";
+  const handleCTA = () => { window.location.href = "/signup"; };
 
   // Typewriter word rotation
   useEffect(() => {
@@ -353,8 +354,8 @@ export const Landing = () => {
           </div>
         </section>
 
-        {/* ── Bottom CTA — honest version ── */}
-        <section className="py-20 px-6 md:px-12 lg:px-24">
+        {/* ── Bottom CTA — only show to logged out visitors ── */}
+        {!isLoggedIn && <section className="py-20 px-6 md:px-12 lg:px-24">
           <div className="max-w-5xl mx-auto">
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
@@ -405,17 +406,17 @@ export const Landing = () => {
                 No fake stats. No inflated numbers. Just a tool that actually works.
               </p>
 
-              <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-                <Link
-                  to={ctaLink}
-                  className="inline-flex items-center gap-2 bg-white text-violet-600 px-8 py-4 rounded-full font-semibold hover:shadow-xl transition-all"
-                >
-                  Start free  <ArrowRight size={20} />
-                </Link>
-              </motion.div>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => { window.location.href = "/signup"; }}
+                style={{ cursor: "pointer", border: "none", background: "white", padding: "16px 32px", borderRadius: "9999px", fontSize: "16px", fontWeight: "600", color: "#7c3aed", display: "inline-flex", alignItems: "center", gap: "8px", zIndex: 999, position: "relative" }}
+              >
+                Start free <ArrowRight size={20} />
+              </motion.button>
             </motion.div>
           </div>
-        </section>
+        </section>}
       </BackgroundLayout>
 
       {/* ── Footer ── */}
