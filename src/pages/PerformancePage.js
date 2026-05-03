@@ -925,18 +925,18 @@ export default function PerformancePage() {
 
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20, marginBottom: 28 }}>
             <div>
-              <h1 style={{ fontSize: 38, fontWeight: 800, color: "#0f0a23", letterSpacing: "-0.035em", lineHeight: 1.1, margin: 0 }}>
+              <h1 style={{ fontSize: 38, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.035em", lineHeight: 1.1, margin: 0 }}>
                 Your Performance,<br />
-                <span style={{ background: "linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Decoded</span>
+                <span style={{ background: "linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent", display: "inline-block" }}>Decoded</span>
               </h1>
-              <p style={{ color: "#6b7280", marginTop: 12, fontSize: 14, maxWidth: 460, lineHeight: 1.65 }}>
+              <p style={{ color: "var(--text-secondary)", marginTop: 12, fontSize: 14, maxWidth: 460, lineHeight: 1.65 }}>
                 Every session, task, and plan builds a model calibrated to your specific patterns — not population averages.
               </p>
             </div>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <div style={{ position: "relative" }}>
-                <select value={timeRange} onChange={e => setTimeRange(parseInt(e.target.value))} style={{ appearance: "none", padding: "9px 34px 9px 14px", borderRadius: 10, fontSize: 13, background: "white", border: "1px solid #e5e7eb", color: "var(--text-primary)", cursor: "pointer", outline: "none", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                <select value={timeRange} onChange={e => setTimeRange(parseInt(e.target.value))} style={{ appearance: "none", padding: "9px 34px 9px 14px", borderRadius: 10, fontSize: 13, background: "var(--card-bg)", border: "1px solid var(--card-border)", color: "var(--text-primary)", cursor: "pointer", outline: "none", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                   <option value={7}>Last 7 days</option>
                   <option value={30}>Last 30 days</option>
                   <option value={90}>Last 90 days</option>
@@ -948,16 +948,16 @@ export default function PerformancePage() {
                 <MessageCircle size={14} /> AI Coach
               </motion.button>
 
-              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowHowItWorks(true)} style={{ padding: "9px 16px", background: "white", border: "1px solid #ddd6fe", borderRadius: 10, color: "#7c3aed", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowHowItWorks(true)} style={{ padding: "9px 16px", background: "var(--card-bg)", border: "1px solid #ddd6fe", borderRadius: 10, color: "var(--accent)", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
                 <HelpCircle size={14} /> How it works
               </motion.button>
 
-              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={trainModel} disabled={training || taskCount < 5} style={{ padding: "9px 16px", background: "white", border: "1px solid #e5e7eb", borderRadius: 10, color: taskCount < 5 ? "#d1d5db" : "#374151", fontSize: 13, fontWeight: 500, cursor: taskCount < 5 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={trainModel} disabled={training || taskCount < 5} style={{ padding: "9px 16px", background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 10, color: taskCount < 5 ? "var(--text-muted)" : "var(--text-primary)", fontSize: 13, fontWeight: 500, cursor: taskCount < 5 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
                 <Brain size={14} className={training ? "animate-pulse" : ""} />
                 {training ? "Training…" : taskCount < 5 ? `Need ${5 - taskCount} more` : "Retrain"}
               </motion.button>
 
-              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={exportData} style={{ padding: "9px 14px", background: "white", border: "1px solid #e5e7eb", borderRadius: 10, color: "#6b7280", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={exportData} style={{ padding: "9px 14px", background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
                 <Download size={14} /> Export
               </motion.button>
 
