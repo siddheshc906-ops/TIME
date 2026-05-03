@@ -10,20 +10,36 @@ import {
   BarChart3,
   LayoutDashboard,
   LogOut,
-  Palette,
   Check,
 } from "lucide-react";
-import { useMode, MODES } from "../context/ModeContext";
+import { useMode } from "../context/ModeContext";
 
 // ─────────────────────────────────────────────
-// ModeSelector dropdown
+// Theme Strip — color line + slide-down panel
 // ─────────────────────────────────────────────
-function ModeSelector() {
+function ThemeStrip() {
   const { mode, setMode, themes } = useMode();
   const [open, setOpen] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
   const ref = useRef(null);
+  const currentTheme = themes[mode];
 
-  // Close on outside click
+  // First-time tooltip — shows 1.5s after login, disappears after 4s, never shows again
+  useEffect(() => {
+    const seen = localStorage.getItem("timevora-theme-hint");
+    if (!seen) {
+      const t = setTimeout(() => {
+        setShowTooltip(true);
+        setTimeout(() => {
+          setShowTooltip(false);
+          localStorage.setItem("timevora-theme-hint", "1");
+        }, 4000);
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  // Close panel on outside click
   useEffect(() => {
     function handler(e) {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
@@ -33,79 +49,168 @@ function ModeSelector() {
   }, []);
 
   return (
-    <div ref={ref} className="relative">
-      {/* Trigger button */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Switch visual mode"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-all font-medium text-sm"
-        style={{
-          color: "var(--accent)",
-          background: open ? "var(--accent-light)" : "transparent",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--accent-light)")}
-        onMouseLeave={(e) =>
-          !open && (e.currentTarget.style.background = "transparent")
-        }
-      >
-        <Palette size={16} />
-        <span className="hidden lg:inline" style={{ color: "var(--accent)" }}>
-          {themes[mode]?.emoji} {themes[mode]?.label}
-        </span>
-        <span className="lg:hidden" style={{ color: "var(--accent)" }}>
-          {themes[mode]?.emoji}
-        </span>
-      </button>
+    <div ref={ref} style={{ position: "absolute", bottom: 0, left: 0, right: 0 }}>
 
-      {/* Dropdown */}
-      {open && (
+      {/* ── Glowing color strip — always visible, clickable ── */}
+      <button
+        onClick={() => {
+          setOpen((o) => !o);
+          setShowTooltip(false);
+          localStorage.setItem("timevora-theme-hint", "1");
+        }}
+        aria-label="Switch theme"
+        style={{
+          display: "block",
+          width: "100%",
+          height: open ? 3 : 2,
+          background: `linear-gradient(90deg, ${currentTheme.previewColor}66, ${currentTheme.previewColor}, ${currentTheme.previewColor}66)`,
+          boxShadow: `0 0 8px ${currentTheme.previewColor}77`,
+          border: "none",
+          cursor: "pointer",
+          padding: 0,
+          transition: "height 0.2s ease, background 0.3s ease, box-shadow 0.3s ease",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.height = "3px"; }}
+        onMouseLeave={(e) => { if (!open) e.currentTarget.style.height = "2px"; }}
+      />
+
+      {/* ── First-time tooltip ── */}
+      {showTooltip && (
         <div
-          className="absolute right-0 mt-2 w-52 rounded-2xl shadow-xl border overflow-hidden z-50"
           style={{
+            position: "fixed",
+            top: 72,
+            left: "50%",
+            transform: "translateX(-50%)",
             background: "var(--card-bg)",
-            borderColor: "var(--card-border)",
-            backdropFilter: "blur(16px)",
-            boxShadow: "0 8px 32px var(--shadow-accent)",
+            border: `1px solid ${currentTheme.previewColor}44`,
+            borderRadius: 99,
+            padding: "7px 16px",
+            fontSize: 12,
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            whiteSpace: "nowrap",
+            zIndex: 9999,
+            boxShadow: `0 4px 20px ${currentTheme.previewColor}33`,
+            pointerEvents: "none",
+            animation: "tvFadeUp 0.3s ease",
           }}
         >
-          <div className="p-1.5">
-            {Object.entries(themes).map(([key, theme]) => (
-              <button
-                key={key}
-                onClick={() => {
-                  setMode(key);
-                  setOpen(false);
-                }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left"
-                style={{
-                  background: mode === key ? "var(--accent-light)" : "transparent",
-                  color: "var(--text-primary)",
-                }}
-                onMouseEnter={(e) =>
-                  mode !== key &&
-                  (e.currentTarget.style.background = "var(--accent-light)")
-                }
-                onMouseLeave={(e) =>
-                  mode !== key && (e.currentTarget.style.background = "transparent")
-                }
-              >
-                {/* Preview dot */}
-                <span
-                  className="w-4 h-4 rounded-full flex-shrink-0"
-                  style={{ background: theme.previewColor, boxShadow: `0 0 6px ${theme.previewColor}88` }}
-                />
-                <span className="flex items-center gap-1.5 text-sm font-medium flex-1">
-                  <span>{theme.emoji}</span>
-                  <span>{theme.label}</span>
-                </span>
-                {mode === key && (
-                  <Check size={14} style={{ color: "var(--accent)" }} />
-                )}
-              </button>
-            ))}
-          </div>
+          <span style={{ color: currentTheme.previewColor, marginRight: 6 }}>✦</span>
+          Click the glowing line to switch themes
         </div>
       )}
+
+      {/* ── Slide-down mode panel ── */}
+      <div
+        style={{
+          position: "fixed",
+          top: 64,
+          left: 0,
+          right: 0,
+          zIndex: 49,
+          background: `color-mix(in srgb, ${currentTheme.previewColor} 6%, var(--nav-bg, #0a0a0a))`,
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          boxShadow: `0 4px 24px rgba(0,0,0,0.4), 0 1px 0 ${currentTheme.previewColor}33`,
+          maxHeight: open ? 80 : 0,
+          opacity: open ? 1 : 0,
+          overflow: "hidden",
+          visibility: open ? "visible" : "hidden",
+          transition: "max-height 0.28s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease, visibility 0s linear " + (open ? "0s" : "0.28s"),
+          pointerEvents: open ? "auto" : "none",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1140,
+            margin: "0 auto",
+            padding: "12px 48px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.1em",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              marginRight: 8,
+              whiteSpace: "nowrap",
+            }}
+          >
+            Theme
+          </span>
+
+          {Object.entries(themes).map(([key, theme]) => {
+            const isActive = mode === key;
+            return (
+              <button
+                key={key}
+                onClick={() => { setMode(key); setOpen(false); }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "6px 14px",
+                  borderRadius: 99,
+                  border: isActive
+                    ? `1px solid ${theme.previewColor}66`
+                    : "1px solid var(--card-border)",
+                  background: isActive ? `${theme.previewColor}14` : "transparent",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  color: isActive ? theme.previewColor : "var(--text-secondary)",
+                  transition: "all 0.15s ease",
+                  whiteSpace: "nowrap",
+                  outline: "none",
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = `${theme.previewColor}10`;
+                    e.currentTarget.style.borderColor = `${theme.previewColor}44`;
+                    e.currentTarget.style.color = theme.previewColor;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderColor = "var(--card-border)";
+                    e.currentTarget.style.color = "var(--text-secondary)";
+                  }
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: theme.previewColor,
+                    flexShrink: 0,
+                    boxShadow: isActive ? `0 0 0 2px ${theme.previewColor}33` : "none",
+                  }}
+                />
+                <span>{theme.emoji}</span>
+                <span>{theme.label}</span>
+                {isActive && <Check size={12} style={{ color: theme.previewColor }} />}
+              </button>
+            );
+          })}
+        </div>
+
+
+      </div>
+
+      <style>{`
+        @keyframes tvFadeUp {
+          from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -118,6 +223,7 @@ export const Navigation = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const { mode, setMode, themes } = useMode();
 
   const token = localStorage.getItem("token");
 
@@ -184,12 +290,13 @@ export const Navigation = () => {
           background: "var(--nav-bg)",
           borderColor: "var(--nav-border)",
           transition: "background 300ms ease, border-color 300ms ease",
+          overflow: "visible",
         }}
       >
         <div className="max-w-7xl mx-auto px-6 lg:px-12 w-full flex items-center justify-between h-16">
 
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2">
+          <Link to="/" className="flex items-center gap-2" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center"
               style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
@@ -269,9 +376,6 @@ export const Navigation = () => {
                 );
               })}
 
-              {/* Mode Switcher */}
-              <ModeSelector />
-
               {/* Logout */}
               <button
                 onClick={handleLogout}
@@ -286,6 +390,9 @@ export const Navigation = () => {
             </div>
           )}
         </div>
+
+        {/* Theme strip — only for logged-in users on desktop */}
+        {token && <ThemeStrip />}
       </nav>
 
       {/* ── Mobile Navbar ── */}
@@ -295,6 +402,7 @@ export const Navigation = () => {
           background: "var(--nav-bg)",
           borderColor: "var(--nav-border)",
           transition: "background 300ms ease, border-color 300ms ease",
+          position: "relative",
         }}
       >
         <div className="px-4 flex items-center justify-between h-16">
@@ -318,7 +426,6 @@ export const Navigation = () => {
 
           {token && (
             <div className="flex items-center gap-2">
-              <ModeSelector />
               <button
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 style={{ color: "var(--text-secondary)" }}
@@ -329,6 +436,20 @@ export const Navigation = () => {
             </div>
           )}
         </div>
+
+        {/* Mobile color strip */}
+        {token && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0, left: 0, right: 0,
+              height: 2,
+              background: `linear-gradient(90deg, ${themes[mode].previewColor}66, ${themes[mode].previewColor}, ${themes[mode].previewColor}66)`,
+              boxShadow: `0 0 6px ${themes[mode].previewColor}66`,
+              transition: "background 0.3s ease",
+            }}
+          />
+        )}
 
         {token && mobileMenuOpen && (
           <div
@@ -355,6 +476,41 @@ export const Navigation = () => {
                 );
               })}
 
+              {/* Mobile theme picker inside hamburger menu */}
+              <div style={{ borderTop: "1px solid var(--divider)", marginTop: 4, paddingTop: 12 }}>
+                <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8, paddingLeft: 4 }}>
+                  Theme
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {Object.entries(themes).map(([key, theme]) => {
+                    const isActive = mode === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => { setMode(key); setMobileMenuOpen(false); }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 12px",
+                          borderRadius: 99,
+                          border: isActive ? `1px solid ${theme.previewColor}66` : "1px solid var(--card-border)",
+                          background: isActive ? `${theme.previewColor}14` : "transparent",
+                          color: isActive ? theme.previewColor : "var(--text-secondary)",
+                          fontSize: 12,
+                          fontWeight: isActive ? 600 : 400,
+                          cursor: "pointer",
+                        }}
+                      >
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: theme.previewColor, flexShrink: 0 }} />
+                        <span>{theme.emoji}</span>
+                        <span>{theme.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <button
                 onClick={handleLogout}
                 className="mt-2 px-4 py-3 text-left font-medium rounded-xl transition flex items-center gap-3"
@@ -368,7 +524,7 @@ export const Navigation = () => {
         )}
       </nav>
 
-      {/* Spacer */}
+      {/* Spacer for fixed navbar */}
       <div className="h-16" />
     </>
   );
