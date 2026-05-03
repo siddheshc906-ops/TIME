@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
-import { motion, useScroll, useTransform, useSpring, AnimatePresence } from "framer-motion";
+import { motion, useTransform, useSpring, AnimatePresence } from "framer-motion";
 import { 
   Brain, TrendingUp, ArrowRight, 
   Sparkles, Clock,
@@ -10,10 +10,8 @@ import BackgroundLayout from "../components/BackgroundLayout";
 
 export const Landing = () => {
   const [wordIndex, setWordIndex] = useState(0);
-  const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30 });
-  const y1 = useTransform(scrollYProgress, [0, 1], [0, -200]);
-  const y2 = useTransform(scrollYProgress, [0, 1], [0, 300]);
+  const y1 = useTransform(useSpring(0), [0, 1], [0, -200]);
+  const y2 = useTransform(useSpring(0), [0, 1], [0, 300]);
 
   const rotatingWords = ["students.", "developers.", "founders.", "you."];
 
@@ -85,12 +83,6 @@ export const Landing = () => {
 
   return (
     <>
-      {/* Scroll progress bar */}
-      <motion.div
-        className="fixed top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 to-indigo-500 z-50 origin-left"
-        style={{ scaleX }}
-      />
-
       <BackgroundLayout>
         {/* ── Hero ── */}
         <section className="relative pt-20 pb-24 px-6 md:px-12 lg:px-24 overflow-hidden">
@@ -424,7 +416,8 @@ export const Landing = () => {
         whileInView={{ opacity: 1 }}
         viewport={{ once: true }}
         transition={{ duration: 0.6 }}
-        className="py-12 bg-slate-50 border-t text-center relative overflow-hidden"
+        className="py-12 border-t text-center relative overflow-hidden"
+        style={{ background: "var(--nav-bg)", borderColor: "var(--nav-border)" }}
       >
         <motion.div
           className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-violet-500 to-transparent"
@@ -432,7 +425,10 @@ export const Landing = () => {
           transition={{ duration: 3, repeat: Infinity, repeatDelay: 2 }}
         />
 
-        <div className="flex justify-center items-center gap-2 mb-3">
+        <div
+          className="flex justify-center items-center gap-2 mb-3 cursor-pointer"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+        >
           <motion.div
             whileHover={{ rotate: 360 }}
             transition={{ duration: 0.5 }}
