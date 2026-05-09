@@ -17,9 +17,8 @@ import { useMode } from "../context/ModeContext";
 // ─────────────────────────────────────────────
 // Theme Strip — color line + slide-down panel
 // ─────────────────────────────────────────────
-function ThemeStrip() {
+function ThemeStrip({ open, setOpen }) {
   const { mode, setMode, themes } = useMode();
-  const [open, setOpen] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
   const ref = useRef(null);
   const currentTheme = themes[mode];
@@ -97,7 +96,7 @@ function ThemeStrip() {
           }}
         >
           <span style={{ color: currentTheme.previewColor, marginRight: 6 }}>✦</span>
-          Click the glowing line to switch themes
+          Click the ≡ icon or glowing line to switch themes
         </div>
       )}
 
@@ -223,6 +222,7 @@ export const Navigation = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
   const { mode, setMode, themes } = useMode();
 
   const token = localStorage.getItem("token");
@@ -295,24 +295,73 @@ export const Navigation = () => {
       >
         <div className="max-w-7xl mx-auto px-6 lg:px-12 w-full flex items-center justify-between h-16">
 
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
-            >
-              <span className="text-white font-bold text-sm">Tv</span>
-            </div>
-            <span className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
-              Timevora
-            </span>
-            <span
-              className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-full"
-              style={{ background: "var(--badge-bg)", color: "var(--badge-text)" }}
-            >
-              Beta
-            </span>
-          </Link>
+          {/* Logo + theme trigger */}
+          <div className="flex items-center gap-2">
+            <Link to="/" className="flex items-center gap-2" onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+              <div
+                className="w-8 h-8 rounded-lg flex items-center justify-center"
+                style={{ background: "linear-gradient(135deg, var(--accent), var(--accent-hover))" }}
+              >
+                <span className="text-white font-bold text-sm">Tv</span>
+              </div>
+              <span className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
+                Timevora
+              </span>
+              <span
+                className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-full"
+                style={{ background: "var(--badge-bg)", color: "var(--badge-text)" }}
+              >
+                Beta
+              </span>
+            </Link>
+
+            {/* 3-line theme trigger — only for logged-in users */}
+            {token && (
+              <button
+                onClick={() => setThemeOpen((o) => !o)}
+                aria-label="Switch theme"
+                title="Switch theme"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  gap: 4,
+                  padding: "6px 8px",
+                  borderRadius: 8,
+                  border: themeOpen ? `1px solid ${themes[mode].previewColor}55` : "1px solid transparent",
+                  background: themeOpen ? `${themes[mode].previewColor}12` : "transparent",
+                  cursor: "pointer",
+                  transition: "all 0.2s ease",
+                  marginLeft: 4,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = `${themes[mode].previewColor}12`;
+                  e.currentTarget.style.borderColor = `${themes[mode].previewColor}44`;
+                }}
+                onMouseLeave={(e) => {
+                  if (!themeOpen) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderColor = "transparent";
+                  }
+                }}
+              >
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    style={{
+                      display: "block",
+                      height: 2,
+                      width: i === 1 ? 14 : 18,
+                      borderRadius: 2,
+                      background: themeOpen ? themes[mode].previewColor : "var(--text-secondary)",
+                      transition: "background 0.2s ease, width 0.2s ease",
+                      boxShadow: themeOpen ? `0 0 4px ${themes[mode].previewColor}88` : "none",
+                    }}
+                  />
+                ))}
+              </button>
+            )}
+          </div>
 
           {/* Right side */}
           {!token ? (
@@ -392,7 +441,7 @@ export const Navigation = () => {
         </div>
 
         {/* Theme strip — only for logged-in users on desktop */}
-        {token && <ThemeStrip />}
+        {token && <ThemeStrip open={themeOpen} setOpen={setThemeOpen} />}
       </nav>
 
       {/* ── Mobile Navbar ── */}
