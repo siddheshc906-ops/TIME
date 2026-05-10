@@ -487,6 +487,7 @@ export default function PerformancePage() {
   const [hasDismissedPrompt, setHasDismissedPrompt] = useState(false);
   const [chronotype, setChronotype] = useState(null);
   const [aiInsights, setAiInsights] = useState([]);
+  const [aiRecommendations, setAiRecommendations] = useState([]);
   const [categoryAccuracy, setCategoryAccuracy] = useState({});
   const [feedbackSummary, setFeedbackSummary] = useState(null);
   const [focusStats, setFocusStats] = useState(null);
@@ -642,13 +643,15 @@ export default function PerformancePage() {
       const data = await res.json();
       if (data.success || data.ready) {
         if (data.chronotype && !chronotype) setChronotype(data.chronotype);
+        // Capture analyzer recommendations
+        const recs = data.profile?.recommendations || data.recommendations || [];
+        if (recs.length > 0) setAiRecommendations(recs);
       }
     } catch { }
   };
 
   const fetchFocusStats = async () => {
     try {
-      // Use user-scoped key so different accounts don't share focus stats
       let userId = 'default';
       try {
         const token = localStorage.getItem("token");
@@ -658,7 +661,26 @@ export default function PerformancePage() {
       const localData = storedStats ? JSON.parse(storedStats) : null;
       if (localData) setFocusStats(localData);
 
-      // Also read from backend task-feedback for AI Planner recorded sessions
+      // Gap 1 Fix: read focus sessions from DB (source of truth)
+      // This ensures cross-device sync and survives localStorage clears
+      try {
+        const dbRes = await fetch(`${BASE_URL}/api/focus-sessions`, { headers: authHeaders() });
+        if (dbRes.ok) {
+          const dbData = await dbRes.json();
+          if (dbData.success) {
+            const merged = {
+              totalMinutes: Math.max(dbData.total_minutes || 0, localData?.totalMinutes || 0),
+              sessionCount: Math.max(dbData.total_sessions || 0, localData?.sessions?.length || localData?.sessionCount || 0),
+              streak: localData?.streak || 0,
+              sessions: localData?.sessions || [],
+            };
+            setFocusStats(merged);
+            return merged;
+          }
+        }
+      } catch {}
+
+      // Fallback: read from task-feedback for AI Planner recorded sessions
       const res = await fetch(`${BASE_URL}/api/task-feedback`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
@@ -747,7 +769,28 @@ export default function PerformancePage() {
     const aiAccuracy = feedbackSummary?.avg_accuracy;
     const planCount = plannerStats?.planCount || 0;
     if (planCount > 0) obs.push({ icon: Bot, accent: "indigo", label: "AI Scheduling", observation: `${planCount} AI-generated schedule${planCount !== 1 ? 's' : ''} — ${plannerStats.totalScheduled || 0} tasks planned.`, detail: "You're offloading planning cognitive load to AI. Smart.", metric: planCount, metricLabel: "schedules", delay: 0.05 });
-    if (aiAccuracy != null) { const pct = Math.round(aiAccuracy * 100); obs.push({ icon: Brain, accent: pct >= 80 ? "emerald" : pct >= 60 ? "amber" : "rose", label: "Prediction Accuracy", observation: `Time estimation accuracy: ${pct}%.`, detail: pct >= 85 ? "The model has genuinely learned your work patterns." : "More data improves this further.", metric: `${pct}%`, metricLabel: "accuracy", delay: 0.10 }); }
+    if (aiAccuracy != null) {
+      const pct = Math.round(aiAccuracy * 100);
+      const over = pct - 100;
+      const under = 100 - pct;
+      const accuracyDisplay = pct > 105 ? `${over}% slower` : pct < 95 ? `${under}% faster` : `On track`;
+      const accuracyObservation = pct > 105
+        ? `Your tasks take ${over}% longer than you plan for.`
+        : pct < 95
+        ? `You finish tasks ${under}% faster than planned.`
+        : `Your time estimates are accurate. Great planning!`;
+      const accuracyDetail = pct > 110
+        ? `When planning a 1-hour task, add ${Math.round(over * 0.8)}–${over} extra minutes. You consistently run over time.`
+        : pct > 105
+        ? `Try adding a small buffer — e.g. if a task feels like 1 hour, block 1h 15m.`
+        : pct < 90
+        ? `You finish faster than expected. You can safely plan more in your day.`
+        : pct < 95
+        ? `You finish slightly ahead of schedule. Your planning is solid.`
+        : `The AI has learned your work pace well. Keep logging tasks.`;
+      const accuracyAccent = pct > 110 ? "rose" : pct > 100 ? "amber" : "emerald";
+      obs.push({ icon: Brain, accent: accuracyAccent, label: "Prediction Accuracy", observation: accuracyObservation, detail: accuracyDetail, metric: accuracyDisplay, metricLabel: "vs your plan", delay: 0.10 });
+    }
     if (chronotype?.type) obs.push({ icon: Sun, accent: "amber", label: "Chronotype", observation: `Identified as: ${chronotype.type}.`, detail: `Demanding tasks are auto-scheduled during your ${chronotype.peak_slot || "peak"} window.`, delay: 0.15 });
     if (obs.length === 0) obs.push({ icon: Calendar, accent: "sky", label: "No Schedules Yet", observation: "No AI schedules generated.", detail: "Open the AI Planner to generate your first intelligent schedule.", delay: 0.05 });
     return obs;
@@ -903,6 +946,20 @@ export default function PerformancePage() {
   const overallObs = buildOverallObs();
   const totalFocusHrs = Math.floor((focusStats?.totalMinutes || 0) / 60);
   const aiAccuracyPct = feedbackSummary?.avg_accuracy ? Math.round(feedbackSummary.avg_accuracy * 100) : null;
+  const predictionFitDisplay = aiAccuracyPct
+    ? aiAccuracyPct > 105
+      ? `${aiAccuracyPct - 100}% slower`
+      : aiAccuracyPct < 95
+      ? `${100 - aiAccuracyPct}% faster`
+      : `On track`
+    : "—";
+  const predictionFitSub = aiAccuracyPct
+    ? aiAccuracyPct > 105
+      ? "you run over your time estimates"
+      : aiAccuracyPct < 95
+      ? "you finish ahead of schedule"
+      : "your estimates are accurate"
+    : "AI accuracy";
 
   return (
     <BackgroundLayout>
@@ -973,7 +1030,7 @@ export default function PerformancePage() {
               { value: `${totalFocusHrs}h`, label: "Focus Hours", sub: "lifetime total", accentColor: "#d97706" },
               { value: analytics?.overview?.completed || 0, label: "Tasks Completed", sub: `of ${taskCount} logged`, accentColor: "#059669" },
               { value: plannerStats?.planCount || 0, label: "AI Schedules", sub: "generated", accentColor: "#7c3aed" },
-              { value: aiAccuracyPct ? `${aiAccuracyPct}%` : "—", label: "Prediction Fit", sub: "AI accuracy", accentColor: "#0284c7" },
+              { value: predictionFitDisplay, label: "Prediction Fit", sub: predictionFitSub, accentColor: "#0284c7" },
             ].map((s, i) => <StatTile key={i} {...s} />)}
           </div>
         </motion.div>
@@ -1117,6 +1174,22 @@ export default function PerformancePage() {
                 </div>
               </div>
             ) : null}
+
+            {/* AI-generated recommendations from analyzer */}
+            {aiRecommendations.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 12 }}>
+                  Personalised Recommendations
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {aiRecommendations.map((rec, i) => (
+                    <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--card-bg)", border: "1px solid var(--card-border)", fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5 }}>
+                      {rec}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </AnalysisPanel>
 
           <AnalysisPanel title="Full Picture" subtitle="Holistic synthesis across all productivity dimensions" icon={Layers} barColor="linear-gradient(135deg, #10b981, #059669)">
