@@ -1,1536 +1,1260 @@
-# backend/main.py
+// frontend/src/pages/PerformancePage.jsx
+// Redesigned — matches Timevora's warm/light aesthetic, professional & elevated
 
-import sys
-import os
-import uuid
-import logging
-import json
-import traceback
-import asyncio
-from pathlib import Path
-from datetime import datetime, timezone, date, timedelta
-from typing import List, Optional
+import { useEffect, useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, AreaChart, Area
+} from "recharts";
+import {
+  TrendingUp, Brain, Clock, Target, Award, Sparkles, Calendar,
+  ChevronRight, Download, RefreshCw, AlertCircle, Zap, Sun,
+  Loader2, ArrowRight, CheckCircle, Activity, MessageCircle,
+  Send, X, Lightbulb, Flame, Eye, Star, Layers, BookOpen, Bot,
+  ChevronDown, HelpCircle, ListTodo, Timer, BarChart2
+} from "lucide-react";
+import BackgroundLayout from "../components/BackgroundLayout";
+import ProductivityScoreCard from "../components/ProductivityScoreCard";
+import { GrowingUserPrompt } from "../components/Onboarding/GrowingUserPrompt";
+import { toast } from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 
-BASE_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(BASE_DIR))
+const BASE_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:8000";
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, WebSocket, Request
-from fastapi.responses import RedirectResponse, JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field, ConfigDict
-from bson import ObjectId
-import certifi
+function authHeaders() {
+  const token = localStorage.getItem("token");
+  return { "Content-Type": "application/json", "Authorization": `Bearer ${token}` };
+}
 
-from auth import hash_password, verify_password, verify_google_token
-from jwt_service import create_access_token
-from otp_service import generate_otp, send_otp_msg91, otp_expiry
-from core.dependencies import get_current_user, set_db
+function decimalToTime(hour) {
+  if (hour == null) return "";
+  const h = Math.floor(hour);
+  const m = Math.round((hour - h) * 60);
+  const period = h < 12 ? "AM" : "PM";
+  const display = h % 12 || 12;
+  return `${display}:${String(m).padStart(2, "0")} ${period}`;
+}
 
-from ai_assistant import AIAssistant, get_ai_context, get_guidance_response
-from ai.core import TimevoraAI
-from ai.scheduler import IntelligentScheduler
-from ai.analyzer import ProductivityAnalyzer
-from ai.learner import AdaptiveLearner
-from ai.recommender import TaskRecommender
+// ─────────────────────────────────────────────────────────────
+// AI Guidance Chat
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// How It Works Modal
+// ─────────────────────────────────────────────────────────────
+function HowItWorksModal({ onClose }) {
+  const steps = [
+    {
+      icon: ListTodo,
+      color: "#7c3aed",
+      bg: "#f5f3ff",
+      border: "#ddd6fe",
+      title: "1. Add & Complete Tasks",
+      desc: "Go to the Planner, add your daily tasks, and mark them as complete when done. Each completed task teaches Timevora your work patterns.",
+      action: { label: "Open Planner", href: "/tasks" },
+    },
+    {
+      icon: Timer,
+      color: "#f59e0b",
+      bg: "#fffbeb",
+      border: "#fde68a",
+      title: "2. Log Focus Sessions",
+      desc: "Use the Focus timer to track deep work sessions. Your session data builds a picture of your concentration patterns and energy levels throughout the day.",
+      action: { label: "Start Focus", href: "/focus" },
+    },
+    {
+      icon: Brain,
+      color: "#0ea5e9",
+      bg: "#f0f9ff",
+      border: "#bae6fd",
+      title: "3. Generate AI Schedules",
+      desc: "Use the AI Planner to create intelligent daily schedules. Each plan you generate and execute improves the AI's understanding of your productivity style.",
+      action: { label: "Open AI Planner", href: "/ai-planner" },
+    },
+    {
+      icon: BarChart2,
+      color: "#059669",
+      bg: "#ecfdf5",
+      border: "#a7f3d0",
+      title: "4. Unlock Performance Insights",
+      desc: "After using all three features, this page comes alive — showing your chronotype, peak hours, task accuracy, focus patterns, and personalised AI coaching.",
+      action: null,
+    },
+  ];
 
-from websocket import manager, websocket_endpoint
-from ml_service import TimevoraLearner
-from analytics_service import AnalyticsService
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 60,
+      background: "rgba(0,0,0,0.4)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <motion.div
+        initial={{ opacity: 0, y: 24, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 24, scale: 0.96 }}
+        transition={{ type: "spring", stiffness: 300, damping: 28 }}
+        style={{
+          width: "100%", maxWidth: 580,
+          background: "var(--card-bg)", borderRadius: 24,
+          boxShadow: "0 32px 80px rgba(109,40,217,0.18), 0 8px 32px rgba(0,0,0,0.12)",
+          overflow: "hidden", border: "1px solid rgba(109,40,217,0.12)",
+          maxHeight: "90vh", overflowY: "auto",
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+          padding: "20px 24px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <HelpCircle size={19} color="white" />
+            </div>
+            <div>
+              <p style={{ color: "white", fontWeight: 800, fontSize: 16 }}>How Performance Works</p>
+              <p style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>4 steps to unlock your full analytics</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={15} color="white" />
+          </button>
+        </div>
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+        {/* Steps */}
+        <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {steps.map((step, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.08, type: "spring", stiffness: 260, damping: 24 }}
+              style={{
+                background: step.bg,
+                border: `1px solid ${step.border}`,
+                borderRadius: 16, padding: "16px 18px",
+                display: "flex", gap: 14, alignItems: "flex-start",
+              }}
+            >
+              <div style={{ width: 38, height: 38, borderRadius: 11, background: "white", border: `1px solid ${step.border}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+                <step.icon size={17} color={step.color} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontWeight: 700, fontSize: 13, color: "var(--text-primary)", marginBottom: 4 }}>{step.title}</p>
+                <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.65 }}>{step.desc}</p>
+                {step.action && (
+                  <a href={step.action.href} style={{
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    marginTop: 10, fontSize: 12, fontWeight: 700,
+                    color: step.color, textDecoration: "none",
+                    background: "white", padding: "5px 12px", borderRadius: 8,
+                    border: `1px solid ${step.border}`,
+                  }}>
+                    {step.action.label} <ArrowRight size={11} />
+                  </a>
+                )}
+              </div>
+            </motion.div>
+          ))}
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / ".env")
+          {/* Bottom note */}
+          <div style={{ background: "var(--card-bg)", borderRadius: 12, padding: "12px 16px", border: "1px solid #f0f0f0", marginTop: 4 }}>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.6, textAlign: "center" }}>
+              💡 You don't need to complete all steps at once. Start with any feature and your insights will grow over time.
+            </p>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
-try:
-    mongo_url = os.environ.get("MONGO_URL")
-    if not mongo_url:
-        raise ValueError("MONGO_URL not set")
+function AIGuidanceChat({ userContext, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(true);
+  const messagesEndRef = useRef(null);
 
-    logger.info("Connecting to MongoDB…")
-    client = AsyncIOMotorClient(
-        mongo_url,
-        tls=True,
-        tlsCAFile=certifi.where(),
-        serverSelectionTimeoutMS=5000,
-        # ✅ FIX: increase pool for concurrent users
-        maxPoolSize=50,
-        minPoolSize=5,
-        connectTimeoutMS=10000,
-        socketTimeoutMS=30000,
-    )
-    db = client[os.environ.get("DB_NAME", "timevora")]
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
-    users             = db.users
-    tasks_col         = db.tasks
-    status_checks     = db.status_checks
-    task_history      = db.task_history
-    daily_plans       = db.daily_plans
-    user_preferences  = db.user_preferences
-    priority_feedback = db.priority_feedback
-    dismissed_tasks   = db.dismissed_tasks
+  const isSchedulingRequest = (text) => {
+    const lower = text.toLowerCase();
+    return ["schedule", "plan my day", "create schedule", "add task", "book time",
+      "plan for", "set up my", "i need to study", "i have to"].some(kw => lower.includes(kw));
+  };
 
-    logger.info("✅ MongoDB client created")
-    set_db(db)  # give dependencies.py access to the DB
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const userMessage = input.trim();
+    setMessages(prev => [...prev, { role: "user", content: userMessage }]);
+    setInput(""); setLoading(true); setShowWelcome(false);
 
-except Exception as e:
-    logger.error(f"❌ MongoDB connection failed: {e}")
-    logger.error(traceback.format_exc())
-
-app = FastAPI(title="Timevora API", description="Timevora Backend API", version="2.0.0")
-
-# ── Rate Limiter setup ──────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-_cors_env = os.environ.get("CORS_ORIGINS", "")
-_cors_from_env = [o.strip() for o in _cors_env.split(",") if o.strip()]
-_cors_defaults = [
-    "https://timevorai.netlify.app",
-    "https://timevora-delta.vercel.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:3001",
-    "http://localhost:3002",
-]
-_all_cors_origins = list(set(_cors_defaults + _cors_from_env))
-logger.info(f"CORS origins: {_all_cors_origins}")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_all_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
-api_router = APIRouter(prefix="/api")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  PYDANTIC MODELS
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-class Task(BaseModel):
-    text: str
-    priority: str
-    completed: bool = False
-    difficulty: Optional[str] = "medium"
-    estimated_time: Optional[float] = 1.0
-    deadline: Optional[datetime] = None
-
-class SignupRequest(BaseModel):
-    email: str
-    password: str
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class GoogleAuthRequest(BaseModel):
-    token: str
-
-class OtpSendRequest(BaseModel):
-    phone: str          # 10-digit Indian number e.g. "9876543210"
-
-class OtpVerifyRequest(BaseModel):
-    phone: str
-    otp: str
-
-class AIPlanningData(BaseModel):
-    tasks: list
-    totalLoad: float
-    focusHours: float
-    overloaded: bool
-    energyDistribution: dict
-
-class TaskAnalyzeInput(BaseModel):
-    name: str
-    priority: str
-    difficulty: str
-    time: float
-
-class AnalyzeDayRequest(BaseModel):
-    tasks: List[TaskAnalyzeInput]
-
-class TaskFeedback(BaseModel):
-    name: str
-    difficulty: str
-    priority: str
-    aiTime: float
-    actualTime: float
-    category: Optional[str] = "general"
-    task_id: Optional[str] = None
-    notes: Optional[str] = None
-
-class ChatMessage(BaseModel):
-    message: str
-    conversation_id: Optional[str] = None
-    conversation_history: Optional[List[dict]] = []  # ✅ FIX: carry full chat history
-
-class AdvancedPlanRequest(BaseModel):
-    tasks: List[dict]
-    preferences: Optional[dict] = {}
-    date: Optional[str] = None
-
-class TaskPredictionRequest(BaseModel):
-    task: dict
-    context: Optional[dict] = {}
-
-class NotificationRequest(BaseModel):
-    type: str
-    title: str
-    message: str
-    icon: Optional[str] = None
-    data: Optional[dict] = None
-
-class PriorityChangeRequest(BaseModel):
-    task_name: str
-    old_priority: str
-    new_priority: str
-
-class TaskCreateRequest(BaseModel):
-    name: str
-    description: Optional[str] = ""
-    duration: int = 60
-    priority: str = "medium"
-    difficulty: str = "medium"
-    category: str = "work"
-    scheduled_time: Optional[datetime] = None
-
-class TaskUpdateRequest(BaseModel):
-    text: Optional[str] = None
-    completed: Optional[bool] = None
-    priority: Optional[str] = None
-    difficulty: Optional[str] = None
-    estimated_time: Optional[float] = None
-    scheduled_time: Optional[datetime] = None
-
-class BulkTaskCreate(BaseModel):
-    tasks: List[TaskCreateRequest]
-
-class ProductivityInsightsResponse(BaseModel):
-    has_sufficient_data: bool
-    total_tasks: int
-    accuracy_insights: dict
-    chronotype: Optional[dict] = None
-    message: Optional[str] = None
-
-class ScheduleRequest(BaseModel):
-    tasks: Optional[List[dict]] = None
-    message: Optional[str] = None
-    date: Optional[str] = None
-
-class DismissTaskRequest(BaseModel):
-    task_id: str
-    reason: Optional[str] = "dismissed"
-
-# ── NEW models for schedule update/delete ──
-class UpdateScheduleRequest(BaseModel):
-    date: Optional[str] = None
-    schedule: List[dict] = []
-
-class DeletePlanByDateRequest(BaseModel):
-    date: Optional[str] = None
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  ROOT / HEALTH
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@app.get("/")
-async def root():
-    return {"message": "Timevora API is running", "status": "healthy", "version": "2.0.0"}
-
-@app.head("/")
-async def root_head():
-    return JSONResponse(content={}, status_code=200)
-
-@app.get("/health")
-async def health_check():
-    mongo_status = "connected" if "client" in globals() and client else "disconnected"
-    from ai.core import USE_GEMINI
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "mongodb": mongo_status,
-        "ai": {"gemini": USE_GEMINI, "any_available": USE_GEMINI},
+    if (isSchedulingRequest(userMessage)) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, {
+          role: "assistant",
+          content: "For scheduling, use the AI Planner — it's purpose-built for that. This space is for analysing your results and coaching.",
+          redirectToPlanner: true,
+        }]);
+        setLoading(false);
+      }, 400);
+      return;
     }
 
-@app.head("/health")
-async def health_head():
-    return JSONResponse(content={}, status_code=200)
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  STATUS
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/test-cors")
-async def test_cors():
-    return {"message": "CORS is working", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-@api_router.get("/")
-async def api_root():
-    return {"message": "Timevora API v2 — all systems operational"}
-
-@api_router.get("/status")
-async def get_status():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    obj = StatusCheck(**input.model_dump())
-    doc = obj.model_dump()
-    doc["timestamp"] = doc["timestamp"].isoformat()
-    await status_checks.insert_one(doc)
-    return obj
-
-@api_router.get("/status/all", response_model=List[StatusCheck])
-async def get_status_checks():
-    results = await status_checks.find({}, {"_id": 0}).to_list(1000)
-    for r in results:
-        r["timestamp"] = datetime.fromisoformat(r["timestamp"])
-    return results
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AUTH
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/signup")
-@limiter.limit("5/minute")  # max 5 signup attempts per minute per IP
-async def signup(request: Request, user: SignupRequest):
-    if await users.find_one({"email": user.email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
-    await users.insert_one({
-        "email": user.email,
-        "hashed_password": hash_password(user.password),
-        "is_verified": True,
-        "created_at": datetime.now(timezone.utc),
-    })
-    return {"message": "Signup successful! You can now log in."}
-
-@api_router.post("/login")
-@limiter.limit("5/minute")  # max 5 login attempts per minute per IP — prevents brute force
-async def login(request: Request, user: LoginRequest):
-    db_user = await users.find_one({"email": user.email})
-    if not db_user or not verify_password(user.password, db_user["hashed_password"]):
-        raise HTTPException(status_code=400, detail="Invalid credentials")
-    token = create_access_token({"sub": db_user["email"], "user_id": str(db_user["_id"]), "email": db_user["email"]})
-    return {"access_token": token, "token_type": "bearer"}
-
-@api_router.get("/verify")
-async def verify_email(token: str):
-    user = await users.find_one({"verification_token": token})
-    if not user:
-        raise HTTPException(status_code=400, detail="Token not found")
-    await users.update_one({"_id": user["_id"]}, {"$set": {"is_verified": True, "verification_token": None}})
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return RedirectResponse(url=f"{frontend_url}/login")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  GOOGLE AUTH
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/auth/google")
-@limiter.limit("10/minute")  # google auth is less risky but still limit it
-async def google_auth(request: Request, req: GoogleAuthRequest):
-    try:
-        gdata = verify_google_token(req.token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid Google token")
-
-    email      = gdata["email"]
-    google_sub = gdata["sub"]
-    name       = gdata.get("name", "")
-    picture    = gdata.get("picture", "")
-
-    user = await users.find_one({"email": email})
-
-    if not user:
-        new_user = {
-            "email":       email,
-            "name":        name,
-            "picture":     picture,
-            "google_sub":  google_sub,
-            "auth_method": "google",
-            "verified":    True,
-            "created_at":  datetime.now(timezone.utc),
-        }
-        await users.insert_one(new_user)
-    else:
-        if not user.get("google_sub"):
-            await users.update_one(
-                {"email": email},
-                {"$set": {"google_sub": google_sub, "picture": picture}}
-            )
-
-    # Fetch user _id for consistent token
-    db_google_user = await users.find_one({"email": email})
-    google_user_id = str(db_google_user["_id"]) if db_google_user else email
-    token = create_access_token({"sub": email, "user_id": google_user_id, "email": email})
-    return {"access_token": token, "token_type": "bearer"}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  PHONE OTP AUTH
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/otp/send")
-@limiter.limit("3/minute")  # OTP sends cost money (MSG91) — strictly limit to 3/min per IP
-async def otp_send(request: Request, req: OtpSendRequest):
-    phone = req.phone.strip()
-    if len(phone) != 10 or not phone.isdigit():
-        raise HTTPException(status_code=400, detail="Enter a valid 10-digit phone number")
-
-    otp        = generate_otp()
-    expiry     = otp_expiry()
-    intl_phone = "91" + phone
-
-    await db.otp_store.update_one(
-        {"phone": phone},
-        {"$set": {"otp": otp, "expires_at": expiry}},
-        upsert=True
-    )
-
-    sent = await send_otp_msg91(intl_phone, otp)
-    if not sent:
-        raise HTTPException(status_code=500, detail="Failed to send OTP. Try again.")
-
-    return {"message": f"OTP sent to +91 {phone}"}
-
-
-@api_router.post("/otp/verify")
-@limiter.limit("5/minute")  # max 5 OTP verify attempts per minute per IP
-async def otp_verify(request: Request, req: OtpVerifyRequest):
-    phone  = req.phone.strip()
-    record = await db.otp_store.find_one({"phone": phone})
-
-    if not record:
-        raise HTTPException(status_code=400, detail="OTP not found. Please request a new one.")
-
-    if datetime.now(timezone.utc) > record["expires_at"].replace(tzinfo=timezone.utc):
-        raise HTTPException(status_code=400, detail="OTP expired. Please request a new one.")
-
-    if record["otp"] != req.otp:
-        raise HTTPException(status_code=400, detail="Incorrect OTP")
-
-    await db.otp_store.delete_one({"phone": phone})
-
-    phone_email = f"{phone}@phone.timevora"
-    user = await users.find_one({"phone": phone})
-
-    if not user:
-        await users.insert_one({
-            "phone":       phone,
-            "email":       phone_email,
-            "auth_method": "phone",
-            "verified":    True,
-            "created_at":  datetime.now(timezone.utc),
-        })
-
-    phone_user = await users.find_one({"phone": phone})
-    phone_user_id = str(phone_user["_id"]) if phone_user else phone_email
-    token = create_access_token({"sub": phone_email, "user_id": phone_user_id, "email": phone_email})
-    return {"access_token": token, "token_type": "bearer"}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  TASKS
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/tasks")
-async def create_task(task: Task, current_user=Depends(get_current_user)):
-    data = task.model_dump()
-    data["user_id"]    = str(current_user["_id"])
-    data["created_at"] = datetime.now(timezone.utc)
-    data["status"]     = "active"
-    data["is_deleted"] = False
-    result  = await tasks_col.insert_one(data)
-    created = {"_id": str(result.inserted_id), **data}
-    await manager.broadcast_to_user(str(current_user["_id"]), {"type": "task:created", "task": created, "timestamp": datetime.now(timezone.utc).isoformat()})
-    return created
-
-@api_router.post("/tasks/enhanced")
-async def create_task_enhanced(task: TaskCreateRequest, current_user=Depends(get_current_user)):
-    data = task.model_dump()
-    data["user_id"]    = str(current_user["_id"])
-    data["created_at"] = datetime.now(timezone.utc)
-    data["completed"]  = False
-    data["text"]       = data.pop("name")
-    data["status"]     = "active"
-    data["is_deleted"] = False
-    result  = await tasks_col.insert_one(data)
-    created = {"_id": str(result.inserted_id), **data}
-    await manager.broadcast_to_user(str(current_user["_id"]), {"type": "task:created", "task": created, "timestamp": datetime.now(timezone.utc).isoformat()})
-    return created
-
-@api_router.get("/tasks")
-async def get_tasks(current_user=Depends(get_current_user)):
-    """Returns a plain array so frontend setTasks(data) works directly."""
-    results = []
-    async for t in tasks_col.find(
-        {"user_id": str(current_user["_id"]), "is_deleted": {"$ne": True}}
-    ).sort("created_at", -1):
-        t["_id"] = str(t["_id"])
-        results.append(t)
-    return results  # plain array, NOT {"tasks": results}
-
-@api_router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    try:
-        obj_id = ObjectId(task_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid task ID format")
-
-    delete_result = await tasks_col.delete_one({"_id": obj_id, "user_id": user_id})
-    await daily_plans.update_many({"user_id": user_id}, {"$pull": {"schedule": {"task_id": task_id}, "optimizedTasks": {"id": task_id}, "pending_tasks": {"task_id": task_id}}})
-    await dismissed_tasks.update_one({"user_id": user_id, "task_id": task_id}, {"$set": {"user_id": user_id, "task_id": task_id, "dismissed_at": datetime.now(timezone.utc), "reason": "deleted"}}, upsert=True)
-    await task_history.update_many({"user_id": user_id, "task_id": task_id}, {"$set": {"task_deleted": True}})
-    await manager.broadcast_to_user(user_id, {"type": "task:deleted", "task_id": task_id, "timestamp": datetime.now(timezone.utc).isoformat()})
-    logger.info(f"🗑️ Task {task_id} deleted for user {user_id} (found: {delete_result.deleted_count})")
-    return {"status": "deleted", "task_id": task_id, "cleaned_plans": True}
-
-@api_router.put("/tasks/{task_id}")
-async def update_task(task_id: str, data: dict, current_user=Depends(get_current_user)):
-    await tasks_col.update_one({"_id": ObjectId(task_id), "user_id": str(current_user["_id"])}, {"$set": data})
-    updated = await tasks_col.find_one({"_id": ObjectId(task_id)})
-    updated["_id"] = str(updated["_id"])
-    await manager.broadcast_to_user(str(current_user["_id"]), {"type": "task:updated", "task": updated, "timestamp": datetime.now(timezone.utc).isoformat()})
-    if data.get("completed"):
-        streak = await _count_completed_tasks(str(current_user["_id"]))
-        if streak and streak % 5 == 0:
-            await manager.broadcast_notification(str(current_user["_id"]), {"type": "achievement", "title": "🎯 Achievement Unlocked!", "message": f"🔥 {streak} tasks completed! You're on fire!", "icon": "🏆"})
-    return {"status": "updated"}
-
-@api_router.patch("/tasks/{task_id}/complete")
-async def mark_task_complete(task_id: str, current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        task = await tasks_col.find_one({"_id": ObjectId(task_id), "user_id": user_id})
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
-        result = await tasks_col.update_one({"_id": ObjectId(task_id), "user_id": user_id}, {"$set": {"completed": True, "status": "completed", "completed_at": datetime.now(timezone.utc)}})
-        if result.modified_count == 0:
-            raise HTTPException(status_code=404, detail="Task not found")
-        await daily_plans.update_many({"user_id": user_id}, {"$pull": {"pending_tasks": {"task_id": task_id}}})
-        return {"success": True, "message": "Task marked as completed", "task": {"id": task_id, "name": task.get("text", ""), "priority": task.get("priority", "medium"), "difficulty": task.get("difficulty", "medium")}}
-    except Exception as e:
-        logger.error(f"Error marking task complete: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-async def _count_completed_tasks(user_id: str) -> int:
-    return await tasks_col.count_documents({"user_id": user_id, "completed": True})
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  PENDING TASKS
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/pending-tasks")
-async def get_pending_tasks(current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        dismissed_ids = set()
-        async for d in dismissed_tasks.find({"user_id": user_id}, {"task_id": 1}):
-            dismissed_ids.add(d["task_id"])
-
-        pending = []
-        async for task in tasks_col.find({"user_id": user_id, "completed": {"$ne": True}, "is_deleted": {"$ne": True}, "status": {"$nin": ["completed", "deleted", "dismissed"]}}).sort("created_at", -1):
-            task_id_str = str(task["_id"])
-            if task_id_str in dismissed_ids:
-                continue
-            pending.append({"id": task_id_str, "name": task.get("text", ""), "priority": task.get("priority", "medium"), "difficulty": task.get("difficulty", "medium"), "estimated_time": task.get("estimated_time", 1.0), "category": task.get("category", "general"), "created_at": task.get("created_at", datetime.now(timezone.utc)).isoformat()})
-
-        return {"success": True, "tasks": pending, "count": len(pending)}
-    except Exception as e:
-        logger.error(f"Error fetching pending tasks: {e}")
-        return {"success": False, "error": str(e), "tasks": [], "count": 0}
-
-@api_router.post("/pending-tasks/{task_id}/dismiss")
-async def dismiss_pending_task(task_id: str, current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        await dismissed_tasks.update_one({"user_id": user_id, "task_id": task_id}, {"$set": {"user_id": user_id, "task_id": task_id, "dismissed_at": datetime.now(timezone.utc), "reason": "dismissed_from_pending"}}, upsert=True)
-        await tasks_col.update_one({"_id": ObjectId(task_id), "user_id": user_id}, {"$set": {"status": "dismissed", "dismissed_at": datetime.now(timezone.utc)}})
-        return {"success": True, "message": "Task dismissed", "task_id": task_id}
-    except Exception as e:
-        logger.error(f"Error dismissing task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.delete("/pending-tasks/{task_id}")
-async def delete_pending_task(task_id: str, current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        await tasks_col.delete_one({"_id": ObjectId(task_id), "user_id": user_id})
-        await dismissed_tasks.update_one({"user_id": user_id, "task_id": task_id}, {"$set": {"user_id": user_id, "task_id": task_id, "dismissed_at": datetime.now(timezone.utc), "reason": "permanently_deleted"}}, upsert=True)
-        await daily_plans.update_many({"user_id": user_id}, {"$pull": {"schedule": {"task_id": task_id}, "optimizedTasks": {"id": task_id}, "pending_tasks": {"task_id": task_id}}})
-        await manager.broadcast_to_user(user_id, {"type": "task:deleted", "task_id": task_id, "timestamp": datetime.now(timezone.utc).isoformat()})
-        return {"success": True, "message": "Task permanently deleted", "task_id": task_id}
-    except Exception as e:
-        logger.error(f"Error deleting pending task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/pending-tasks/dismiss-all")
-async def dismiss_all_pending_tasks(current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        pending_ids = []
-        async for task in tasks_col.find({"user_id": user_id, "completed": {"$ne": True}, "is_deleted": {"$ne": True}}, {"_id": 1}):
-            pending_ids.append(str(task["_id"]))
-        if pending_ids:
-            for tid in pending_ids:
-                await dismissed_tasks.update_one({"user_id": user_id, "task_id": tid}, {"$set": {"user_id": user_id, "task_id": tid, "dismissed_at": datetime.now(timezone.utc), "reason": "bulk_dismiss"}}, upsert=True)
-            await tasks_col.update_many({"user_id": user_id, "completed": {"$ne": True}}, {"$set": {"status": "dismissed", "dismissed_at": datetime.now(timezone.utc)}})
-        return {"success": True, "message": f"Dismissed {len(pending_ids)} pending tasks", "dismissed_count": len(pending_ids)}
-    except Exception as e:
-        logger.error(f"Error dismissing all tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@api_router.post("/pending-tasks/restore/{task_id}")
-async def restore_dismissed_task(task_id: str, current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        await dismissed_tasks.delete_one({"user_id": user_id, "task_id": task_id})
-        await tasks_col.update_one({"_id": ObjectId(task_id), "user_id": user_id}, {"$set": {"status": "active"}, "$unset": {"dismissed_at": ""}})
-        return {"success": True, "message": "Task restored", "task_id": task_id}
-    except Exception as e:
-        logger.error(f"Error restoring task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  TASK FEEDBACK
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/task-feedback")
-async def task_feedback_endpoint(feedback: TaskFeedback, current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    if feedback.aiTime <= 0 or feedback.actualTime <= 0:
-        raise HTTPException(status_code=400, detail="aiTime and actualTime must be > 0")
-
-    accuracy_ratio = round(feedback.aiTime / feedback.actualTime, 3)
-    now = datetime.now(timezone.utc)
-
-    feedback_doc = {"user_id": user_id, "name": feedback.name, "difficulty": feedback.difficulty, "priority": feedback.priority, "category": feedback.category or "general", "aiTime": feedback.aiTime, "actualTime": feedback.actualTime, "accuracy_ratio": accuracy_ratio, "hour_of_day": now.hour, "day_of_week": now.strftime("%A"), "created_at": now}
-    if feedback.task_id:
-        feedback_doc["task_id"] = feedback.task_id
-    if feedback.notes:
-        feedback_doc["notes"] = feedback.notes
-
-    result = await task_history.insert_one(feedback_doc)
-
-    if feedback.task_id:
-        try:
-            await tasks_col.update_one({"_id": ObjectId(feedback.task_id), "user_id": user_id}, {"$set": {"completed": True, "status": "completed", "actualTime": feedback.actualTime, "completed_at": now}})
-            await dismissed_tasks.update_one({"user_id": user_id, "task_id": feedback.task_id}, {"$set": {"user_id": user_id, "task_id": feedback.task_id, "dismissed_at": now, "reason": "completed_with_feedback"}}, upsert=True)
-        except Exception as e:
-            logger.warning(f"Could not update original task: {e}")
-
-    count = await task_history.count_documents({"user_id": user_id})
-    retrain_triggered = False
-    if count >= 10 and count % 10 == 0:
-        asyncio.create_task(_background_train_model(user_id))
-        retrain_triggered = True
-
-    await _update_user_streak(user_id)
-    insight = _generate_quick_insight(accuracy_ratio, feedback.name)
-
-    return {"status": "saved", "feedback_id": str(result.inserted_id), "total_records": count, "accuracy_ratio": accuracy_ratio, "retrain_triggered": retrain_triggered, "insight": insight, "message": f"Feedback saved! {count} total tasks tracked."}
-
-
-def _generate_quick_insight(accuracy_ratio: float, task_name: str) -> str:
-    if accuracy_ratio > 1.3:
-        return f"You finished '{task_name}' {round((accuracy_ratio - 1) * 100)}% faster than estimated! 🚀"
-    elif accuracy_ratio < 0.7:
-        return f"'{task_name}' took {round((1 - accuracy_ratio) * 100)}% longer than expected. I'll adjust future estimates. ⏰"
-    elif accuracy_ratio < 0.85:
-        return f"'{task_name}' took a bit longer than estimated. Noted for future scheduling. 📝"
-    else:
-        return f"Great estimate for '{task_name}'! Your predictions are getting accurate. ✨"
-
-async def _background_train_model(user_id: str):
-    try:
-        learner = AdaptiveLearner(user_id, db)
-        success = await learner.train_model()
-        if success:
-            await user_preferences.update_one({"user_id": user_id}, {"$set": {"last_trained": datetime.now(timezone.utc), "last_trained_count": await task_history.count_documents({"user_id": user_id})}}, upsert=True)
-    except Exception as e:
-        logger.error(f"❌ Background retrain error for {user_id}: {e}")
-
-async def _update_user_streak(user_id: str):
-    try:
-        streak = await calculate_user_streak(user_id)
-        await user_preferences.update_one({"user_id": user_id}, {"$set": {"streak": streak, "last_updated": datetime.now(timezone.utc)}}, upsert=True)
-    except Exception as e:
-        logger.error(f"Error updating streak: {e}")
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  TASK FEEDBACK HISTORY
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/task-feedback")
-async def get_feedback_history(current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    history = []
-    async for record in task_history.find({"user_id": user_id}).sort("created_at", -1).limit(100):
-        record["_id"] = str(record["_id"])
-        history.append(record)
-    total = len(history)
-    avg_accuracy   = sum(r.get("accuracy_ratio", 1.0) for r in history) / total if total else 0
-    overestimates  = sum(1 for r in history if r.get("accuracy_ratio", 1.0) > 1.2)
-    underestimates = sum(1 for r in history if r.get("accuracy_ratio", 1.0) < 0.8)
-    return {"history": history, "summary": {"total_feedbacks": total, "avg_accuracy": round(avg_accuracy, 3), "overestimates": overestimates, "underestimates": underestimates, "model_ready": total >= 10}}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  TASK PRIORITY
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/task-priority")
-async def update_task_priority(request: PriorityChangeRequest, current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        await priority_feedback.insert_one({"user_id": user_id, "task_name": request.task_name, "old_priority": request.old_priority, "new_priority": request.new_priority, "created_at": datetime.now(timezone.utc)})
-        return {"success": True, "message": f"Priority updated to {request.new_priority}"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AI PRODUCTIVITY PROFILE
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/ai/productivity-profile")
-async def get_productivity_profile(current_user=Depends(get_current_user)):
-    try:
-        user_id      = str(current_user["_id"])
-        ai           = TimevoraAI(user_id, db)
-        full_profile = await ai.get_productivity_profile()
-        accuracy     = await get_user_accuracy(user_id)
-
-        accuracy_insights = {}
-        for difficulty, ratio in accuracy.items():
-            if ratio > 1.2:
-                accuracy_insights[difficulty] = f"Takes {int((ratio - 1) * 100)}% longer than estimated"
-            elif ratio < 0.8:
-                accuracy_insights[difficulty] = f"Completes {int((1 - ratio) * 100)}% faster than estimated"
-
-        legacy_chronotype   = await detect_chronotype(user_id)
-        total_tasks         = await task_history.count_documents({"user_id": user_id})
-        has_sufficient_data = total_tasks >= 5
-
-        return {"success": True, "ready": full_profile.get("ready", has_sufficient_data), "feedbacks_given": full_profile.get("feedbacks_given", total_tasks), "feedbacks_needed": 5 if not has_sufficient_data else 0, "overall_accuracy": full_profile.get("overall_accuracy", 0), "accuracy_trend": full_profile.get("accuracy_trend", "insufficient_data"), "category_accuracy": full_profile.get("category_accuracy", {}), "difficulty_accuracy": full_profile.get("difficulty_accuracy", accuracy), "energy_patterns": full_profile.get("energy_patterns", {}), "insights": full_profile.get("insights", []), "streak": full_profile.get("streak", 0), "productivity_score": full_profile.get("productivity_score", 0), "message": full_profile.get("message", ""), "chronotype": full_profile.get("chronotype") or legacy_chronotype, "profile": full_profile, "has_sufficient_data": has_sufficient_data, "total_tasks": total_tasks, "accuracy_insights": accuracy_insights}
-
-    except Exception as e:
-        logger.error(f"Productivity profile error: {e}", exc_info=True)
-        try:
-            user_id     = str(current_user["_id"])
-            total_tasks = await task_history.count_documents({"user_id": user_id})
-            return {"success": False, "ready": total_tasks >= 5, "feedbacks_given": total_tasks, "feedbacks_needed": max(0, 5 - total_tasks), "total_tasks": total_tasks, "accuracy_insights": {}, "chronotype": await detect_chronotype(user_id), "insights": [], "message": f"Complete {max(0, 5 - total_tasks)} more tasks to unlock insights!" if total_tasks < 5 else "", "error": str(e)}
-        except Exception:
-            return {"success": False, "error": str(e)}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AI CHRONOTYPE
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/ai/chronotype")
-async def get_chronotype_endpoint(current_user=Depends(get_current_user)):
-    try:
-        user_id     = str(current_user["_id"])
-        ai          = TimevoraAI(user_id, db)
-        chrono_data = await ai.get_chronotype_data()
-        if chrono_data and chrono_data.get("ready"):
-            return {"success": True, **chrono_data}
-        legacy_chrono = await detect_chronotype(user_id)
-        total_tasks   = await task_history.count_documents({"user_id": user_id})
-        if legacy_chrono:
-            return {"success": True, "ready": True, **legacy_chrono, "total_tasks_analyzed": total_tasks}
-        return {"success": True, "ready": False, "tasks_completed": total_tasks, "tasks_needed": max(0, 14 - total_tasks), "message": f"Complete {max(0, 14 - total_tasks)} more tasks to discover your chronotype!"}
-    except Exception as e:
-        logger.error(f"Chronotype endpoint error: {e}", exc_info=True)
-        return {"success": False, "ready": False, "error": str(e)}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AI LEARNING INSIGHTS
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/ai/insights")
-async def get_ai_insights(current_user=Depends(get_current_user)):
-    try:
-        user_id = str(current_user["_id"])
-        ai      = TimevoraAI(user_id, db)
-        profile = await ai.get_productivity_profile()
-        if not profile.get("ready"):
-            return {"success": True, "ready": False, "insights": [], "feedbacks_given": profile.get("feedbacks_given", 0), "feedbacks_needed": profile.get("feedbacks_needed", 5), "message": profile.get("message", "Complete more tasks to unlock insights!")}
-        return {"success": True, "ready": True, "insights": profile.get("insights", []), "chronotype": profile.get("chronotype"), "accuracy_trend": profile.get("accuracy_trend", "stable"), "overall_accuracy": profile.get("overall_accuracy", 0), "feedbacks_given": profile.get("feedbacks_given", 0)}
-    except Exception as e:
-        logger.error(f"AI insights error: {e}", exc_info=True)
-        return {"success": False, "error": str(e), "insights": []}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  LEGACY CHRONOTYPE DETECTION
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-async def detect_chronotype(user_id: str) -> dict:
-    try:
-        completed_hours = []
-        async for task in tasks_col.find({"user_id": user_id, "completed": True}, {"created_at": 1, "scheduled_time": 1, "completed_at": 1}):
-            dt = task.get("completed_at") or task.get("scheduled_time") or task.get("created_at")
-            if dt:
-                if isinstance(dt, str):
-                    try:
-                        dt = datetime.fromisoformat(dt)
-                    except (ValueError, TypeError):
-                        continue
-                completed_hours.append(dt.hour)
-
-        async for record in task_history.find({"user_id": user_id}, {"created_at": 1, "hour_of_day": 1}):
-            hour = record.get("hour_of_day")
-            if hour is not None:
-                completed_hours.append(hour)
-            elif record.get("created_at") and isinstance(record["created_at"], datetime):
-                completed_hours.append(record["created_at"].hour)
-
-        if len(completed_hours) < 5:
-            return None
-
-        morning_count   = sum(1 for h in completed_hours if 5  <= h < 12)
-        afternoon_count = sum(1 for h in completed_hours if 12 <= h < 17)
-        evening_count   = sum(1 for h in completed_hours if 17 <= h < 23)
-        night_count     = sum(1 for h in completed_hours if h >= 23 or h < 5)
-        max_count       = max(morning_count, afternoon_count, evening_count, night_count)
-
-        if max_count == morning_count and morning_count > 0:
-            return {"type": "Morning Lion",    "emoji": "🦁", "peak": "9–11 AM",      "peak_slot": "morning",   "description": "You're at your sharpest in the morning.", "color": "#F59E0B"}
-        elif max_count == evening_count and evening_count > 0:
-            return {"type": "Night Owl",       "emoji": "🦉", "peak": "8–10 PM",      "peak_slot": "evening",   "description": "Your creative energy peaks in the evening.", "color": "#3B82F6"}
-        elif max_count == night_count and night_count > 0:
-            return {"type": "Midnight Phoenix","emoji": "🔥", "peak": "10 PM – 1 AM", "peak_slot": "night",     "description": "You do your best work when the world is quiet.", "color": "#EF4444"}
-        else:
-            return {"type": "Afternoon Wolf",  "emoji": "🐺", "peak": "2–4 PM",       "peak_slot": "afternoon", "description": "You hit your stride after lunch.", "color": "#8B5CF6"}
-    except Exception as e:
-        logger.error(f"Chronotype detection error: {e}")
-        return None
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  DAILY PLANS
-# ║  NOTE: Specific routes (/generate, /update-schedule, /by-date) MUST come
-# ║  BEFORE the catch-all /{plan_id} route or FastAPI will treat them as IDs.
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/daily-plans")
-async def get_daily_plans(current_user=Depends(get_current_user)):
-    plans = []
-    async for p in daily_plans.find({"user_id": str(current_user["_id"])}).sort("created_at", -1):
-        p["_id"] = str(p["_id"])
-        plans.append(p)
-    return plans
-
-@api_router.post("/daily-plans/generate")
-async def generate_daily_plan(request: ScheduleRequest, current_user=Depends(get_current_user)):
-    try:
-        user_id     = str(current_user["_id"])
-        target_date = request.date or date.today().isoformat()
-        tasks       = request.tasks or []
-
-        if not tasks:
-            dismissed_ids = set()
-            async for d in dismissed_tasks.find({"user_id": user_id}, {"task_id": 1}):
-                dismissed_ids.add(d["task_id"])
-            db_tasks = []
-            async for t in tasks_col.find({"user_id": user_id, "completed": {"$ne": True}, "is_deleted": {"$ne": True}, "status": {"$nin": ["completed", "deleted", "dismissed"]}}).limit(50):
-                task_id_str = str(t["_id"])
-                if task_id_str in dismissed_ids:
-                    continue
-                db_tasks.append({"name": t.get("text", ""), "estimatedTime": t.get("estimated_time", 1.0), "priority": t.get("priority", "medium"), "difficulty": t.get("difficulty", "medium"), "category": t.get("category", "general"), "task_id": task_id_str})
-            tasks = db_tasks
-
-        if not tasks:
-            return {"success": True, "message": "No tasks to schedule. Add tasks first!", "schedule": []}
-
-        ai = TimevoraAI(user_id, db)
-        await ai._load_user_context()
-        for t in tasks:
-            t.setdefault("difficulty", "medium")
-            t.setdefault("priority",   "medium")
-            t.setdefault("category",   "general")
-            t.setdefault("duration",   t.get("estimatedTime", 1.0))
-            t.setdefault("name",       t.get("text", t.get("task", "Untitled")))
-
-        schedule  = ai._create_schedule_manually(tasks, [])
-        formatted = ai._format_schedule_items(schedule)
-
-        await daily_plans.update_one({"user_id": user_id, "date": target_date}, {"$set": {"schedule": formatted, "task_count": len(tasks), "created_at": datetime.now(timezone.utc), "source": "ai_generated"}}, upsert=True)
-
-        return {"success": True, "schedule": formatted, "date": target_date, "patterns_used": bool(ai.context.productivity_patterns), "message": f"Schedule created with {len(formatted)} time blocks"}
-
-    except Exception as e:
-        logger.error(f"Generate daily plan error: {e}", exc_info=True)
-        return {"success": False, "error": str(e), "schedule": []}
-
-
-@api_router.post("/daily-plans/update-schedule")
-async def update_schedule(request: UpdateScheduleRequest, current_user=Depends(get_current_user)):
-    """
-    ✅ THE KEY FIX: Save updated schedule after task deletion.
-    Called by frontend whenever a task is deleted or the schedule changes.
-    Empty schedule = delete the plan document so refresh shows empty state.
-    """
-    try:
-        user_id     = str(current_user["_id"])
-        target_date = request.date or date.today().isoformat()
-        schedule    = request.schedule
-
-        if not schedule:
-            # No tasks left — delete plan so page refreshes to empty
-            await daily_plans.delete_one({"user_id": user_id, "date": target_date})
-            logger.info(f"🗑️ Plan cleared for user {user_id} on {target_date}")
-            return {"success": True, "message": "Plan cleared", "date": target_date}
-
-        await daily_plans.update_one(
-            {"user_id": user_id, "date": target_date},
-            {"$set": {"schedule": schedule, "updated_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
-
-        logger.info(f"✅ Schedule updated for user {user_id} on {target_date}: {len(schedule)} items")
-        return {"success": True, "message": f"Schedule saved with {len(schedule)} tasks", "date": target_date, "count": len(schedule)}
-
-    except Exception as e:
-        logger.error(f"update_schedule error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.delete("/daily-plans/by-date")
-async def delete_daily_plan_by_date(request: DeletePlanByDateRequest, current_user=Depends(get_current_user)):
-    """Delete plan for a specific date (Clear button). Uses /by-date to avoid conflict with /{plan_id}."""
-    try:
-        user_id     = str(current_user["_id"])
-        target_date = request.date or date.today().isoformat()
-        result      = await daily_plans.delete_one({"user_id": user_id, "date": target_date})
-        logger.info(f"🗑️ Plan cleared for user {user_id} on {target_date} (deleted: {result.deleted_count})")
-        return {"success": True, "message": "Plan cleared", "date": target_date, "deleted_count": result.deleted_count}
-    except Exception as e:
-        logger.error(f"delete_daily_plan error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@api_router.get("/daily-plans/{plan_date}")
-async def get_daily_plan_by_date(plan_date: str, current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    plan = await daily_plans.find_one({"user_id": user_id, "date": plan_date})
-    if plan:
-        plan["_id"] = str(plan["_id"])
-        return plan
-    return {"message": "No plan found for this date", "schedule": []}
-
-
-@api_router.delete("/daily-plans/{plan_id}")
-async def delete_plan(plan_id: str, current_user=Depends(get_current_user)):
-    await daily_plans.delete_one({"_id": ObjectId(plan_id), "user_id": str(current_user["_id"])})
-    return {"status": "deleted"}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  ACCURACY + PRODUCTIVITY SCORE
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.get("/accuracy")
-async def get_accuracy_endpoint(current_user=Depends(get_current_user)):
-    return await get_user_accuracy(str(current_user["_id"]))
-
-@api_router.get("/productivity-score")
-async def get_productivity_score(current_user=Depends(get_current_user)):
-    user_id  = str(current_user["_id"])
-    analyzer = ProductivityAnalyzer(user_id, db)
-    patterns = await analyzer.analyze_patterns()
-    score_data = patterns.get("productivity_score", {})
-    focus_data = patterns.get("focus_patterns", {})
-    completion = patterns.get("task_completion", {})
-    return {"score": score_data.get("overall", 0), "completion_rate": completion.get("overall_rate", 0), "focus_hours": focus_data.get("average_focus_time", 0), "components": score_data.get("components", {})}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  DAY CONTEXT — User's daily structure (blocked slots, meals, wake/sleep)
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-class DayContextRequest(BaseModel):
-    """Direct save of day context from frontend settings panel."""
-    wake_up:       Optional[float] = 7.0
-    day_start:     Optional[float] = 9.0
-    lunch_start:   Optional[float] = 13.0
-    lunch_end:     Optional[float] = 14.0
-    dinner_start:  Optional[float] = 19.0
-    day_end:       Optional[float] = 22.0
-    blocked_slots: Optional[list]  = []
-
-@api_router.get("/day-context")
-async def get_day_context(current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    doc = await db.user_day_context.find_one({"user_id": user_id})
-    if doc:
-        doc["_id"] = str(doc["_id"])
-        return {"success": True, "context": doc, "has_custom": True}
-    # Return defaults
-    return {
-        "success":    True,
-        "has_custom": False,
-        "context": {
-            "wake_up": 7.0, "day_start": 9.0,
-            "lunch_start": 13.0, "lunch_end": 14.0,
-            "dinner_start": 19.0, "day_end": 22.0,
-            "blocked_slots": [],
-        },
+    try {
+      const response = await fetch(`${BASE_URL}/api/ai/guidance`, {
+        method: "POST", headers: authHeaders(),
+        body: JSON.stringify({ message: userMessage })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data.success) {
+        setMessages(prev => [...prev, {
+          role: "assistant", content: data.message,
+          contextUsed: data.context_used,
+          advicePoints: data.advice_points || [],
+          suggestions: data.suggestions || [],
+        }]);
+      } else {
+        setMessages(prev => [...prev, { role: "assistant", content: data.message || "I'm having trouble right now.", isError: true }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: "Connection issue. Please try again.", isError: true }]);
+    } finally { setLoading(false); }
+  };
+
+  const handleKeyPress = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+  const suggestedQuestions = [
+    "How can I improve my focus?",
+    "What's my biggest productivity gap?",
+    "How do I study more effectively?",
+    "How should I structure my week?",
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.35)", backdropFilter: "blur(6px)" }}>
+      <motion.div
+        initial={{ opacity: 0, y: 20, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 20, scale: 0.97 }}
+        transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        style={{
+          width: "100%", maxWidth: 640, height: 600,
+          display: "flex", flexDirection: "column",
+          background: "var(--card-bg)", borderRadius: 20,
+          boxShadow: "0 32px 80px rgba(109,40,217,0.18), 0 8px 32px rgba(0,0,0,0.12)",
+          overflow: "hidden", border: "1px solid rgba(109,40,217,0.12)",
+        }}
+      >
+        <div style={{
+          padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+          background: "linear-gradient(135deg, #6d28d9, #4f46e5)", flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Brain size={17} color="white" />
+            </div>
+            <div>
+              <p style={{ color: "white", fontWeight: 700, fontSize: 14 }}>AI Performance Coach</p>
+              <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 11 }}>Powered by your data</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, background: "rgba(255,255,255,0.15)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={15} color="white" />
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px", background: "var(--card-bg)" }}>
+          {showWelcome && messages.length === 0 && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ paddingTop: 24 }}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: "var(--text-primary)", marginBottom: 6 }}>What would you like to explore?</p>
+              <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 20 }}>Ask anything about your performance, habits, or how to improve.</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {suggestedQuestions.map((q, i) => (
+                  <button key={i} onClick={() => setInput(q)} style={{
+                    padding: "8px 14px", borderRadius: 20, fontSize: 12, cursor: "pointer",
+                    background: "var(--input-bg)", border: "1px solid var(--card-border)", color: "var(--accent)", fontWeight: 500,
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.06)"
+                  }}>{q}</button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {messages.map((msg, idx) => (
+              <motion.div key={idx} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start" }}>
+                <div style={{
+                  maxWidth: "80%", padding: "12px 16px",
+                  borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+                  background: msg.role === "user" ? "linear-gradient(135deg, var(--accent), var(--accent-hover))" : msg.isError ? "#fef2f2" : "var(--card-bg)",
+                  border: msg.role !== "user" ? (msg.isError ? "1px solid #fecaca" : "1px solid #e5e7eb") : "none",
+                  boxShadow: msg.role !== "user" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+                }}>
+                  <p style={{ fontSize: 13, lineHeight: 1.65, color: msg.role === "user" ? "white" : msg.isError ? "#dc2626" : "#374151", whiteSpace: "pre-wrap" }}>
+                    {msg.content}
+                  </p>
+                  {msg.advicePoints?.length > 0 && (
+                    <ul style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      {msg.advicePoints.map((pt, i) => (
+                        <li key={i} style={{ display: "flex", gap: 8, fontSize: 12, color: "#4b5563" }}>
+                          <span style={{ color: "#7c3aed" }}>→</span>{pt}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {msg.redirectToPlanner && (
+                    <a href="/ai-planner" style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#4f46e5", textDecoration: "none", fontWeight: 600 }}>
+                      Open AI Planner <ArrowRight size={11} />
+                    </a>
+                  )}
+                  {msg.contextUsed && !msg.isError && (
+                    <p style={{ marginTop: 8, fontSize: 10, color: "#9ca3af", display: "flex", alignItems: "center", gap: 4 }}>
+                      <Sparkles size={9} /> Personalised from your data
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+          {loading && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: "flex", gap: 5, marginTop: 12 }}>
+              {[0, 120, 240].map(d => (
+                <div key={d} style={{ width: 7, height: 7, borderRadius: "50%", background: "#7c3aed", animation: `bounce 1s ${d}ms infinite` }} />
+              ))}
+            </motion.div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div style={{ padding: "14px 18px", borderTop: "1px solid #f0f0f5", background: "white", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyPress={handleKeyPress}
+              placeholder="Ask your coach..." rows={1}
+              style={{
+                flex: 1, resize: "none", background: "#f9f9fc", border: "1.5px solid #e5e7eb",
+                borderRadius: 12, padding: "11px 14px", fontSize: 13, color: "#1f2937",
+                outline: "none", maxHeight: 100, fontFamily: "inherit",
+              }}
+            />
+            <button onClick={sendMessage} disabled={loading || !input.trim()} style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+              border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              opacity: (loading || !input.trim()) ? 0.4 : 1, flexShrink: 0
+            }}>
+              <Send size={15} color="white" />
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Insight Card
+// ─────────────────────────────────────────────────────────────
+function InsightCard({ icon: Icon, label, observation, detail, accent = "violet", delay = 0, metric, metricLabel }) {
+  const palette = {
+    violet: { bg: "#f5f3ff", border: "#ddd6fe", icon: "#7c3aed", label: "#7c3aed", metricColor: "#6d28d9" },
+    amber:  { bg: "#fffbeb", border: "#fde68a", icon: "#d97706", label: "#b45309", metricColor: "#92400e" },
+    emerald:{ bg: "#ecfdf5", border: "#a7f3d0", icon: "#059669", label: "#047857", metricColor: "#065f46" },
+    rose:   { bg: "#fff1f2", border: "#fecdd3", icon: "#e11d48", label: "#be123c", metricColor: "#9f1239" },
+    sky:    { bg: "#f0f9ff", border: "#bae6fd", icon: "#0284c7", label: "#0369a1", metricColor: "#075985" },
+    indigo: { bg: "#eef2ff", border: "#c7d2fe", icon: "#4f46e5", label: "#4338ca", metricColor: "#3730a3" },
+  };
+  const c = palette[accent] || palette.violet;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, type: "spring", stiffness: 220, damping: 24 }}
+      whileHover={{ y: -2, boxShadow: "0 8px 28px rgba(109,40,217,0.10)", transition: { duration: 0.18 } }}
+      style={{
+        background: "white", border: "1px solid #ede9f4",
+        borderRadius: 14, padding: "20px 22px",
+        boxShadow: "0 1px 6px rgba(0,0,0,0.05)",
+        position: "relative", overflow: "hidden",
+      }}
+    >
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: c.icon, borderRadius: "14px 0 0 14px", opacity: 0.7 }} />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: c.bg, display: "flex", alignItems: "center", justifyContent: "center", border: `1px solid ${c.border}` }}>
+            <Icon size={14} color={c.icon} />
+          </div>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: c.label }}>{label}</span>
+        </div>
+        {metric != null && (
+          <div style={{ textAlign: "right" }}>
+            <p style={{ fontSize: 22, fontWeight: 800, color: c.metricColor, lineHeight: 1, letterSpacing: "-0.03em" }}>{metric}</p>
+            {metricLabel && <p style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{metricLabel}</p>}
+          </div>
+        )}
+      </div>
+      <p style={{ fontSize: 14, fontWeight: 600, color: "#111827", lineHeight: 1.45, marginBottom: detail ? 7 : 0 }}>{observation}</p>
+      {detail && <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.55 }}>{detail}</p>}
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Section Panel
+// ─────────────────────────────────────────────────────────────
+function AnalysisPanel({ title, subtitle, icon: Icon, barColor, children }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ type: "spring", stiffness: 100, damping: 20 }}
+      style={{
+        background: "var(--card-bg)", borderRadius: 20,
+        boxShadow: "0 2px 16px rgba(109,40,217,0.07), 0 1px 4px rgba(0,0,0,0.05)",
+        border: "1px solid rgba(109,40,217,0.09)", overflow: "hidden",
+      }}
+    >
+      <div style={{ background: barColor, padding: "16px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Icon size={18} color="white" />
+        </div>
+        <div>
+          <p style={{ color: "white", fontWeight: 700, fontSize: 15 }}>{title}</p>
+          {subtitle && <p style={{ color: "rgba(255,255,255,0.72)", fontSize: 12, marginTop: 1 }}>{subtitle}</p>}
+        </div>
+      </div>
+      <div style={{ padding: "24px" }}>{children}</div>
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// KPI Stat Tile
+// ─────────────────────────────────────────────────────────────
+function StatTile({ value, label, sub, accentColor }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -2, transition: { duration: 0.15 } }}
+      style={{
+        background: "white", borderRadius: 14, padding: "20px 22px",
+        boxShadow: "0 1px 8px rgba(109,40,217,0.07)",
+        border: "1px solid rgba(109,40,217,0.09)",
+      }}
+    >
+      <p style={{ fontSize: 30, fontWeight: 800, color: "#111827", letterSpacing: "-0.04em", lineHeight: 1 }}>{value}</p>
+      <p style={{ fontSize: 12, fontWeight: 700, color: accentColor, marginTop: 8 }}>{label}</p>
+      {sub && <p style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>{sub}</p>}
+    </motion.div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Chart Tooltip
+// ─────────────────────────────────────────────────────────────
+const ChartTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: "white", border: "1px solid #e5e7eb", borderRadius: 10,
+      padding: "10px 14px", fontSize: 12, color: "var(--text-primary)",
+      boxShadow: "0 4px 16px rgba(0,0,0,0.10)"
+    }}>
+      <p style={{ marginBottom: 4, color: "#9ca3af", fontSize: 11 }}>{label}</p>
+      {payload.map((p, i) => <p key={i} style={{ color: p.color || "#7c3aed", fontWeight: 700 }}>{p.name}: {p.value}</p>)}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Main Page
+// ─────────────────────────────────────────────────────────────
+export default function PerformancePage() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [userState, setUserState] = useState(() => {
+    return localStorage.getItem('tv_userState') || 'new';
+  });
+  const [taskCount, setTaskCount] = useState(0);
+  const [chartData, setChartData] = useState([]);
+  const [patterns, setPatterns] = useState(null);
+  const [analytics, setAnalytics] = useState(null);
+  const [timeRange, setTimeRange] = useState(30);
+  const [training, setTraining] = useState(false);
+  const [productivityScore, setProductivityScore] = useState(null);
+  const [error, setError] = useState(null);
+  const [hasDismissedPrompt, setHasDismissedPrompt] = useState(false);
+  const [chronotype, setChronotype] = useState(null);
+  const [aiInsights, setAiInsights] = useState([]);
+  const [aiRecommendations, setAiRecommendations] = useState([]);
+  const [categoryAccuracy, setCategoryAccuracy] = useState({});
+  const [feedbackSummary, setFeedbackSummary] = useState(null);
+  const [focusStats, setFocusStats] = useState(null);
+  const [plannerStats, setPlannerStats] = useState(null);
+  const [showGuidanceChat, setShowGuidanceChat] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+
+  // ✅ FIX: Persist userState so backend sleep doesn't reset to 'new'
+  function updateUserState(state) {
+    if (state !== 'new') {
+      localStorage.setItem('tv_userState', state);
     }
+    setUserState(state);
+  }
 
-@api_router.post("/day-context")
-async def save_day_context(request: DayContextRequest, current_user=Depends(get_current_user)):
-    user_id = str(current_user["_id"])
-    ctx = request.dict()
-    ctx["user_id"]    = user_id
-    ctx["has_custom"] = True
-    ctx["updated_at"] = datetime.now(timezone.utc)
-    await db.user_day_context.update_one(
-        {"user_id": user_id}, {"$set": ctx}, upsert=True
-    )
-    return {"success": True, "message": "Day context saved!"}
+  useEffect(() => { fetchAllData(); }, [timeRange]);
 
+  const fetchAllData = async () => {
+    setLoading(true); setError(null);
+    try {
+      // Run all fetches in parallel, collect key counts for userState decision
+      const [taskCount, focusData, plannerData, feedbackData] = await Promise.all([
+        fetchTasks(),
+        fetchFocusStats(),
+        fetchPlannerStats(),
+        fetchFeedbackData(),
+      ]);
+      // Run remaining fetches that don't affect userState
+      await Promise.all([
+        fetchAccuracy(), fetchPatterns(), fetchAnalytics(),
+        fetchProductivityScore(), fetchChronotypeData(),
+        fetchAIInsightsData(), fetchProductivityProfile(),
+      ]);
 
-class DailyCheckinRequest(BaseModel):
-    """Save a date-specific schedule override (e.g. 'today I have no college')."""
-    date:          str
-    day_start:     Optional[float] = None
-    day_end:       Optional[float] = None
-    lunch_start:   Optional[float] = None
-    lunch_end:     Optional[float] = None
-    dinner_start:  Optional[float] = None
-    blocked_slots: Optional[list]  = []
-    note:          Optional[str]   = None
+      // Determine userState from ALL pages — not just Planner task count
+      const hasPlanner   = (taskCount || 0) > 0;
+      const hasFocus     = (focusData?.totalMinutes || 0) > 0 || (focusData?.sessionCount || 0) > 0;
+      const hasAIPlanner = (plannerData?.planCount || 0) > 0;
+      const hasFeedback  = (feedbackData?.total || 0) > 0;
 
-@api_router.post("/day-context/today")
-async def save_today_context(request: DailyCheckinRequest, current_user=Depends(get_current_user)):
-    """
-    Save a date-specific override so today's schedule is different
-    from the user's usual routine without changing their saved routine.
-    """
-    user_id = str(current_user["_id"])
-    ctx = {k: v for k, v in request.dict().items() if v is not None}
-    ctx["user_id"]      = user_id
-    ctx["date_override"] = request.date
-    ctx["has_custom"]   = True
-    ctx["updated_at"]   = datetime.now(timezone.utc)
-    await db.user_day_context.update_one(
-        {"user_id": user_id, "date_override": request.date},
-        {"$set": ctx},
-        upsert=True,
-    )
-    return {"success": True, "message": f"Today's schedule saved for {request.date}"}
-
-@api_router.get("/day-context/today")
-async def get_today_context(current_user=Depends(get_current_user)):
-    """Get the context specifically for today (date-specific override if set)."""
-    user_id   = str(current_user["_id"])
-    today_str = date.today().isoformat()
-    doc = await db.user_day_context.find_one(
-        {"user_id": user_id, "date_override": today_str}
-    )
-    if doc:
-        doc["_id"] = str(doc["_id"])
-        return {"success": True, "has_override": True, "context": doc}
-    return {"success": True, "has_override": False, "date": today_str}
-
-
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AI ASSISTANT CHAT — Merges new tasks into existing schedule
-# ╚══════════════════════════════════════════════════════════════════════════════
-
-@api_router.post("/ai-assistant/chat")
-@limiter.limit("30/minute")  # ✅ FIX: prevent API abuse and Gemini cost spikes
-async def chat_with_ai(
-    request: Request,
-    chat_request: ChatMessage = None,
-    current_user=Depends(get_current_user)
-):
-    if chat_request is None:
-        chat_request = await request.json()
-        chat_request = ChatMessage(**chat_request)
-    try:
-        user_id   = str(current_user["_id"])
-        assistant = AIAssistant(user_id, db)
-        # ✅ FIX: pass full conversation history so AI has full context
-        response  = await assistant.process_message(
-            chat_request.message,
-            conversation_history=chat_request.conversation_history or [],
-        )
-
-        # ── Save / MERGE schedule to MongoDB ──────────────────────────────────
-        if (
-            response.get("type") == "schedule"
-            and response.get("schedule")
-            and len(response["schedule"]) > 0
-        ):
-            today_str = date.today().isoformat()
-            new_items = response["schedule"]
-
-            try:
-                # Fetch any existing plan for today
-                existing_plan = await daily_plans.find_one(
-                    {"user_id": user_id, "date": today_str}
-                )
-                existing_schedule = existing_plan.get("schedule", []) if existing_plan else []
-
-                # Decide: add-task (merge) vs full re-plan (replace)
-                # Priority 1: AI explicitly flagged add_intent
-                # Priority 2: keyword heuristic on user message
-                msg_lower = chat_request.message.lower()
-                is_add_intent = bool(response.get("add_intent"))  # set by _handle_add_task
-                if not is_add_intent and existing_schedule:
-                    _add_kws  = ["add ", "also add", "also schedule", "include ",
-                                 "put ", "insert", "add task", "one more",
-                                 "add another", "i also need", "i also have"]
-                    _full_kws = ["plan my day", "plan my whole", "reschedule",
-                                 "redo my schedule", "create schedule", "make a new",
-                                 "start over", "start fresh", "optimize my schedule",
-                                 "organise my day", "organize my day"]
-                    has_add  = any(kw in msg_lower for kw in _add_kws)
-                    has_full = any(kw in msg_lower for kw in _full_kws)
-                    is_add_intent = has_add and not has_full
-
-                if is_add_intent and existing_schedule:
-                    # ── ADD TASK: _handle_add_task already placed the new tasks
-                    # in free slots using _find_free_slots, which returns ONLY
-                    # the new tasks.  We merge them here and send the FULL
-                    # merged list back to the frontend so it can just replace
-                    # its state (no second merge needed on the frontend).
-                    def _decimal(time_str):
-                        """'2:15 PM' → 14.25"""
-                        if not time_str:
-                            return None
-                        m = re.match(r'(\d+):(\d+)\s*(AM|PM)', str(time_str), re.IGNORECASE)
-                        if not m:
-                            return None
-                        h, mn, period = int(m[1]), int(m[2]), m[3].upper()
-                        if period == "PM" and h != 12: h += 12
-                        if period == "AM" and h == 12: h = 0
-                        return h + mn / 60
-
-                    def _fmt(decimal_h):
-                        """14.25 → '2:15 PM'"""
-                        h = int(decimal_h)
-                        m = round((decimal_h - h) * 60)
-                        period = "AM" if h < 12 else "PM"
-                        dh = h % 12 or 12
-                        return f"{dh}:{m:02d} {period}"
-
-                    # Normalise existing schedule times to strings for consistent storage
-                    normalised_existing = []
-                    for item in existing_schedule:
-                        st = item.get("start_time")
-                        et = item.get("end_time")
-                        if isinstance(st, (int, float)):
-                            item = {**item, "start_time": _fmt(st), "end_time": _fmt(et or st + item.get("duration", 1))}
-                        normalised_existing.append(item)
-
-                    # Normalise new items too
-                    normalised_new = []
-                    for item in new_items:
-                        st = item.get("start_time")
-                        et = item.get("end_time")
-                        if isinstance(st, (int, float)):
-                            item = {**item, "start_time": _fmt(st), "end_time": _fmt(et or st + item.get("duration", 1))}
-                        normalised_new.append(item)
-
-                    merged_schedule = normalised_existing + normalised_new
-
-                    # ── CRITICAL: tell frontend the response already has the
-                    # full merged schedule — do NOT merge again on the frontend.
-                    response["schedule"]                  = merged_schedule
-                    response["full_schedule_in_response"] = True
-
-                    logger.info(
-                        f"➕ Merged {len(normalised_new)} new task(s) into existing "
-                        f"{len(normalised_existing)}-item schedule for user {user_id}"
-                    )
-                else:
-                    merged_schedule = new_items
-                    response["full_schedule_in_response"] = False
-                    logger.info(
-                        f"🔄 Full schedule replacement ({len(new_items)} items) "
-                        f"for user {user_id} on {today_str}"
-                    )
-
-                await daily_plans.update_one(
-                    {"user_id": user_id, "date": today_str},
-                    {
-                        "$set": {
-                            "schedule":    merged_schedule,
-                            "insights":    response.get("insights", []),
-                            "tasks_found": response.get("tasks_found", []),
-                            "created_at":  datetime.now(timezone.utc),
-                            "source":      "ai_chat",
-                        }
-                    },
-                    upsert=True,
-                )
-                logger.info(
-                    f"✅ Schedule saved to daily_plans for user {user_id} "
-                    f"on {today_str} with {len(merged_schedule)} tasks"
-                )
-            except Exception as save_err:
-                logger.error(f"Failed to save/merge schedule to daily_plans: {save_err}")
-
-        return response
-
-    except Exception as e:
-        logger.error(f"AI Assistant error: {e}", exc_info=True)
-        return {
-            "type":    "error",
-            "message": "I'm having trouble right now. Please try again.",
+      // ✅ FIX: If backend returned null (failed/sleeping), don't reset userState
+      if (taskCount === null) {
+        // Backend is sleeping — keep whatever userState we have from localStorage
+      } else if (!hasPlanner && !hasFocus && !hasAIPlanner && !hasFeedback && taskCount === 0) {
+        // Only set 'new' if localStorage also doesn't have a saved state
+        if (!localStorage.getItem('tv_userState')) {
+          updateUserState('new');
         }
+      } else if ((taskCount || 0) < 5) {
+        updateUserState('beginner');
+      } else if ((taskCount || 0) < 15) {
+        updateUserState('intermediate');
+      } else {
+        updateUserState('active');
+      }
+    } catch (err) {
+      setError("Failed to load performance data");
+      toast.error("Failed to load performance data");
+    } finally { setLoading(false); }
+  };
 
+  const fetchTasks = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/tasks`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const count = Array.isArray(data) ? data.filter(t => !t.is_deleted).length : 0;
+        setTaskCount(count);
+        return count;
+      }
+      return null; // ✅ FIX: null means backend failed, not genuinely empty
+    } catch (err) { console.error(err); return null; }
+  };
 
-@api_router.get("/ai-assistant/context")
-async def get_ai_context_endpoint(current_user=Depends(get_current_user)):
-    try:
-        return await get_ai_context(str(current_user["_id"]), db)
-    except Exception as e:
-        logger.error(f"Context error: {e}")
-        # ✅ UPDATED: Student-focused suggestions (Priority 3 fix)
-        return {
-            "suggestions": [
-                "I have Physics, Maths and Chemistry to study today — plan it",
-                "Exam in 3 days, help me plan my revision schedule",
-                "I study best in the morning, plan 6 hours of study",
-                "Analyze my study patterns this week"
-            ],
-            "has_history": False,
-            "quick_actions": ["Create Schedule", "Get Advice", "Analyze Habits"]
+  const fetchAccuracy = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ml/accuracy`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.by_difficulty) {
+          const formatted = Object.entries(data.by_difficulty).map(([difficulty, accuracy]) => ({
+            difficulty, accuracy: Math.round(accuracy * 100),
+          }));
+          setChartData(formatted);
         }
+      }
+    } catch (err) { console.error(err); }
+  };
 
+  const fetchPatterns = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ml/patterns`, { headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); setPatterns(data); }
+    } catch (err) { console.error(err); }
+  };
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  AI GUIDANCE (NEW: Performance page AI chat)
-# ╚══════════════════════════════════════════════════════════════════════════════
+  const fetchAnalytics = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/analytics?days=${timeRange}`, { headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); setAnalytics(data); }
+    } catch (err) { console.error(err); }
+  };
 
-@api_router.post("/ai/guidance")
-async def get_guidance(
-    request: ChatMessage,
-    current_user=Depends(get_current_user),
-):
-    """
-    Performance page AI coaching chat.
-    Uses real user data to give personalised answers.
-    """
-    try:
-        result = await get_guidance_response(
-            str(current_user["_id"]),
-            db,
-            request.message,
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Guidance error: {e}", exc_info=True)
-        return {
-            "success": False,
-            "message": "Could not load guidance. Please try again.",
+  const fetchProductivityScore = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/productivity-score`, { headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); setProductivityScore(data); }
+    } catch { }
+  };
+
+  const fetchChronotypeData = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai/chronotype`, { headers: authHeaders() });
+      if (res.ok) { const data = await res.json(); if (data.success) setChronotype(data); }
+    } catch { }
+  };
+
+  const fetchAIInsightsData = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai/insights`, { headers: authHeaders() });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      if (data.success && data.insights) setAiInsights(data.insights);
+    } catch { }
+  };
+
+  const fetchFeedbackData = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/task-feedback`, { headers: authHeaders() });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      setFeedbackSummary(data.summary);
+      if (data.history?.length > 0) {
+        const categoryMap = {};
+        data.history.forEach(record => {
+          const cat = record.category || 'general';
+          const ratio = record.accuracy_ratio || 1;
+          if (!categoryMap[cat]) categoryMap[cat] = { total: 0, count: 0 };
+          categoryMap[cat].total += ratio; categoryMap[cat].count += 1;
+        });
+        const fc = {};
+        Object.entries(categoryMap).forEach(([cat, { total, count }]) => { fc[cat] = (total / count).toFixed(2); });
+        setCategoryAccuracy(fc);
+      }
+      return { total: data.history?.length || 0 };
+    } catch { return { total: 0 }; }
+  };
+
+  const fetchProductivityProfile = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ai/productivity-profile`, { headers: authHeaders() });
+      if (!res.ok) throw new Error('Failed');
+      const data = await res.json();
+      if (data.success || data.ready) {
+        if (data.chronotype && !chronotype) setChronotype(data.chronotype);
+        // Capture analyzer recommendations
+        const recs = data.profile?.recommendations || data.recommendations || [];
+        if (recs.length > 0) setAiRecommendations(recs);
+      }
+    } catch { }
+  };
+
+  const fetchFocusStats = async () => {
+    try {
+      let userId = 'default';
+      try {
+        const token = localStorage.getItem("token");
+        if (token) userId = JSON.parse(atob(token.split('.')[1])).sub || 'default';
+      } catch {}
+      const storedStats = localStorage.getItem(`focusStats_${userId}`) || localStorage.getItem("focusStats");
+      const localData = storedStats ? JSON.parse(storedStats) : null;
+      if (localData) setFocusStats(localData);
+
+      // Gap 1 Fix: read focus sessions from DB (source of truth)
+      // This ensures cross-device sync and survives localStorage clears
+      try {
+        const dbRes = await fetch(`${BASE_URL}/api/focus-sessions`, { headers: authHeaders() });
+        if (dbRes.ok) {
+          const dbData = await dbRes.json();
+          if (dbData.success) {
+            const merged = {
+              totalMinutes: Math.max(dbData.total_minutes || 0, localData?.totalMinutes || 0),
+              sessionCount: Math.max(dbData.total_sessions || 0, localData?.sessions?.length || localData?.sessionCount || 0),
+              streak: localData?.streak || 0,
+              sessions: localData?.sessions || [],
+            };
+            setFocusStats(merged);
+            return merged;
+          }
         }
+      } catch {}
 
+      // Fallback: read from task-feedback for AI Planner recorded sessions
+      const res = await fetch(`${BASE_URL}/api/task-feedback`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const history = data.history || [];
+        const focusSessions = history.filter(h => h.name === "Focus Session" || h.name?.includes("Focus"));
+        const totalMinutes = focusSessions.reduce((sum, s) => sum + (s.actualTime || s.aiTime || 0) * 60, 0);
+        const merged = {
+          totalMinutes: Math.max(totalMinutes, localData?.totalMinutes || 0),
+          sessionCount: Math.max(focusSessions.length, localData?.sessions?.length || localData?.sessionCount || 0),
+          streak: localData?.streak || 0,
+          sessions: localData?.sessions || [],
+        };
+        setFocusStats(merged);
+        return merged;
+      }
+      return localData;
+    } catch { return null; }
+  };
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  ADVANCED AI ROUTES
-# ╚══════════════════════════════════════════════════════════════════════════════
+  const fetchPlannerStats = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/daily-plans`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        const plans = Array.isArray(data) ? data : data.plans || [];
+        const totalScheduled = plans.reduce((sum, p) => sum + (p.schedule?.length || p.task_count || 0), 0);
+        const result = { planCount: plans.length, totalScheduled, recentPlan: plans[0] || null };
+        setPlannerStats(result);
+        return result;
+      }
+      return { planCount: 0, totalScheduled: 0 };
+    } catch { return { planCount: 0, totalScheduled: 0 }; }
+  };
 
-@api_router.post("/ai/advanced-plan")
-async def advanced_planning(request: AdvancedPlanRequest, current_user=Depends(get_current_user)):
-    try:
-        scheduler = IntelligentScheduler(str(current_user["_id"]), db)
-        result    = await scheduler.create_optimal_schedule(request.tasks, request.preferences or {})
-        formatted = [{"task": item["task"], "start_time": _fmt_time(item["start_time"]), "end_time": _fmt_time(item["end_time"]), "duration": round(item["duration"], 1), "priority": item.get("priority", "medium"), "focus_score": item.get("focus_score", 5), "energy_score": item.get("energy_score", 0.5), "time": f"{_fmt_time(item['start_time'])} - {_fmt_time(item['end_time'])}"} for item in result["schedule"]]
-        plan_date = request.date or date.today().isoformat()
-        await daily_plans.update_one({"user_id": str(current_user["_id"]), "date": plan_date}, {"$set": {"schedule": formatted, "created_at": datetime.now(timezone.utc), "source": "advanced_ai"}}, upsert=True)
-        return {"success": True, "schedule": formatted, "insights": result["insights"], "metrics": {"total_focus_time": round(result.get("total_focus_time", 0), 1), "energy_alignment": round(result.get("energy_aligned", 0), 3)}}
-    except Exception as e:
-        logger.error(f"Advanced planning error: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+  const trainModel = async () => {
+    setTraining(true);
+    toast.loading("Training AI model...", { id: "train" });
+    try {
+      const res = await fetch(`${BASE_URL}/api/ml/train`, { method: "POST", headers: authHeaders() });
+      const data = await res.json();
+      if (data.success) { toast.success("Model updated.", { id: "train" }); fetchAllData(); }
+      else toast.error("Training failed", { id: "train" });
+    } catch { toast.error("Training error", { id: "train" }); }
+    finally { setTraining(false); }
+  };
 
-@api_router.get("/ai/recommendations")
-async def get_recommendations(current_user=Depends(get_current_user)):
-    try:
-        user_id      = str(current_user["_id"])
-        pending      = await db.tasks.find({"user_id": user_id, "completed": False}).sort("created_at", -1).limit(20).to_list(20)
-        history      = await db.task_history.find({"user_id": user_id}).sort("created_at", -1).limit(50).to_list(50)
-        accuracy     = await get_user_accuracy(user_id)
-        streak       = await calculate_user_streak(user_id)
-        recommender  = TaskRecommender(user_id, db)
-        recommendations = await recommender.get_recommendations({"pending_tasks": pending, "task_history": history, "stats": {**accuracy, "streak": streak}})
-        return {"success": True, "recommendations": recommendations}
-    except Exception as e:
-        logger.error(f"Recommendations error: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+  const exportData = () => {
+    const dataStr = JSON.stringify({ analytics, patterns, chartData, productivityScore, chronotype, aiInsights, focusStats, plannerStats }, null, 2);
+    const link = document.createElement('a');
+    link.setAttribute('href', 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr));
+    link.setAttribute('download', `timevora-analytics-${new Date().toISOString().slice(0, 10)}.json`);
+    link.click();
+    toast.success("Export complete.");
+  };
 
-@api_router.post("/ai/train-model")
-async def train_ai_model(current_user=Depends(get_current_user)):
-    try:
-        learner = AdaptiveLearner(str(current_user["_id"]), db)
-        success = await learner.train_model()
-        if success:
-            return {"success": True, "message": "🎉 Model trained! AI predictions are now personalised to you."}
-        return {"success": False, "message": "📊 Need at least 30 completed tasks to train. Keep tracking!"}
-    except Exception as e:
-        logger.error(f"Train model error: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+  // ── Observation builders ──────────────────────────────────
 
-@api_router.get("/ai/patterns")
-async def get_learning_patterns(current_user=Depends(get_current_user)):
-    try:
-        learner  = AdaptiveLearner(str(current_user["_id"]), db)
-        patterns = await learner.get_productivity_patterns()
-        return {"success": True, "patterns": patterns}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+  const buildFocusObs = () => {
+    const obs = [];
+    const totalMins = focusStats?.totalMinutes || 0;
+    const streak = focusStats?.streak || 0;
+    const sessions = focusStats?.sessionCount || focusStats?.sessions?.length || 0;
+    const hrs = Math.floor(totalMins / 60); const mins = totalMins % 60;
+    if (totalMins > 0) obs.push({ icon: Clock, accent: "violet", label: "Deep Work", observation: `${hrs > 0 ? `${hrs}h ${mins}m` : `${mins} minutes`} of intentional focus logged.`, detail: hrs >= 10 ? "Substantial deep work hours — this is where compounding begins." : "Every session contributes. Keep building.", metric: hrs > 0 ? `${hrs}h` : `${mins}m`, metricLabel: "total focus", delay: 0.05 });
+    if (streak > 0) obs.push({ icon: Flame, accent: "amber", label: "Streak", observation: `${streak} consecutive day${streak !== 1 ? 's' : ''} of consistent work.`, detail: streak >= 7 ? "A week-long streak signals identity, not just habit." : "Momentum is building. Protect this.", metric: streak, metricLabel: "day streak", delay: 0.10 });
+    if (sessions > 0) obs.push({ icon: Target, accent: "emerald", label: "Sessions", observation: `${sessions} focus session${sessions !== 1 ? 's' : ''} tracked.`, detail: sessions >= 20 ? "Twenty sessions makes this non-negotiable." : "Consistency over intensity.", metric: sessions, metricLabel: "completed", delay: 0.15 });
+    if (obs.length === 0) obs.push({ icon: Eye, accent: "sky", label: "No Data Yet", observation: "No focus sessions recorded.", detail: "Open the Focus page and start your first timed session.", delay: 0.05 });
+    return obs;
+  };
 
-@api_router.post("/ai/predict-task")
-async def predict_task(request: TaskPredictionRequest, current_user=Depends(get_current_user)):
-    try:
-        learner       = AdaptiveLearner(str(current_user["_id"]), db)
-        ctx           = request.context or {"hour": datetime.now().hour, "day": datetime.now().weekday(), "month": datetime.now().month}
-        accuracy      = await learner.predict_accuracy(request.task, ctx)
-        adjusted_time = round(request.task.get("time", 1) * accuracy, 1)
-        return {"success": True, "predicted_accuracy": accuracy, "adjusted_time": adjusted_time}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+  const buildPlannerObs = () => {
+    const obs = [];
+    const completed = analytics?.overview?.completed || feedbackSummary?.total_feedbacks || 0;
+    const rate = analytics?.overview?.completion_rate;
+    const bestDay = patterns?.best_day;
+    const peakHours = patterns?.peak_hours;
+    if (completed > 0) obs.push({ icon: CheckCircle, accent: "emerald", label: "Task Execution", observation: `${completed} task${completed !== 1 ? 's' : ''} completed and tracked.`, detail: rate ? `${rate.toFixed(0)}% completion rate. ${rate >= 80 ? "Execution at this level is rare." : "There's room to close the gap."}` : null, metric: completed, metricLabel: "completed", delay: 0.05 });
+    if (bestDay) obs.push({ icon: Star, accent: "amber", label: "Peak Day", observation: `${bestDay} is your highest-output day, consistently.`, detail: "Weight your most demanding work here.", delay: 0.10 });
+    if (peakHours?.length > 0) obs.push({ icon: Zap, accent: "violet", label: "Peak Hours", observation: `Flow state occurs around ${peakHours.map(h => decimalToTime(h)).join(" and ")}.`, detail: "Protect this window. Eliminate interruptions.", delay: 0.15 });
+    if (obs.length === 0) obs.push({ icon: BookOpen, accent: "indigo", label: "Awaiting Data", observation: "Complete tasks to unlock planning insights.", detail: "Each task teaches the system your patterns.", delay: 0.05 });
+    return obs;
+  };
 
+  const buildAIPlannerObs = () => {
+    const obs = [];
+    const aiAccuracy = feedbackSummary?.avg_accuracy;
+    const planCount = plannerStats?.planCount || 0;
+    if (planCount > 0) obs.push({ icon: Bot, accent: "indigo", label: "AI Scheduling", observation: `${planCount} AI-generated schedule${planCount !== 1 ? 's' : ''} — ${plannerStats.totalScheduled || 0} tasks planned.`, detail: "You're offloading planning cognitive load to AI. Smart.", metric: planCount, metricLabel: "schedules", delay: 0.05 });
+    if (aiAccuracy != null) {
+      const pct = Math.round(aiAccuracy * 100);
+      const over = pct - 100;
+      const under = 100 - pct;
+      const accuracyDisplay = pct > 105 ? `${over}% slower` : pct < 95 ? `${under}% faster` : `On track`;
+      const accuracyObservation = pct > 105
+        ? `Your tasks take ${over}% longer than you plan for.`
+        : pct < 95
+        ? `You finish tasks ${under}% faster than planned.`
+        : `Your time estimates are accurate. Great planning!`;
+      const accuracyDetail = pct > 110
+        ? `When planning a 1-hour task, add ${Math.round(over * 0.8)}–${over} extra minutes. You consistently run over time.`
+        : pct > 105
+        ? `Try adding a small buffer — e.g. if a task feels like 1 hour, block 1h 15m.`
+        : pct < 90
+        ? `You finish faster than expected. You can safely plan more in your day.`
+        : pct < 95
+        ? `You finish slightly ahead of schedule. Your planning is solid.`
+        : `The AI has learned your work pace well. Keep logging tasks.`;
+      const accuracyAccent = pct > 110 ? "rose" : pct > 100 ? "amber" : "emerald";
+      obs.push({ icon: Brain, accent: accuracyAccent, label: "Prediction Accuracy", observation: accuracyObservation, detail: accuracyDetail, metric: accuracyDisplay, metricLabel: "vs your plan", delay: 0.10 });
+    }
+    if (chronotype?.type) obs.push({ icon: Sun, accent: "amber", label: "Chronotype", observation: `Identified as: ${chronotype.type}.`, detail: `Demanding tasks are auto-scheduled during your ${chronotype.peak_slot || "peak"} window.`, delay: 0.15 });
+    if (obs.length === 0) obs.push({ icon: Calendar, accent: "sky", label: "No Schedules Yet", observation: "No AI schedules generated.", detail: "Open the AI Planner to generate your first intelligent schedule.", delay: 0.05 });
+    return obs;
+  };
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  WEBSOCKET + NOTIFICATIONS
-# ╚══════════════════════════════════════════════════════════════════════════════
+  const buildOverallObs = () => {
+    const obs = [];
+    const score = productivityScore?.score || patterns?.productivity_score;
+    const focusMins = focusStats?.totalMinutes || 0;
+    const completed = analytics?.overview?.completed || 0;
+    const planCount = plannerStats?.planCount || 0;
+    const activeAreas = [focusMins > 0, completed > 0, planCount > 0].filter(Boolean).length;
+    if (activeAreas === 3) obs.push({ icon: Sparkles, accent: "violet", label: "System Coverage", observation: "All three productivity dimensions are active.", detail: "Focus, Planning, and AI scheduling working together — this is where compounding begins.", delay: 0.05 });
+    else if (activeAreas === 2) obs.push({ icon: TrendingUp, accent: "amber", label: "Coverage Gap", observation: "Two of three dimensions are active.", detail: `Add ${focusMins === 0 ? "focus sessions" : planCount === 0 ? "AI planning" : "task tracking"} to unlock compounding performance effects.`, delay: 0.05 });
+    else obs.push({ icon: Activity, accent: "sky", label: "Early Stage", observation: "System is in observation mode.", detail: "Each action — session, task, or plan — adds intelligence to your model.", delay: 0.05 });
+    if (score != null) obs.push({ icon: Award, accent: score >= 70 ? "emerald" : score >= 40 ? "amber" : "rose", label: "Performance Index", observation: `Performance index: ${score} / 100.`, detail: score >= 80 ? "Operating at a level most never reach." : "Foundation is forming. Focus on daily execution.", metric: score, metricLabel: "index", delay: 0.10 });
+    if (aiInsights.length > 0) { const text = aiInsights[0].text || aiInsights[0]; obs.push({ icon: Lightbulb, accent: "indigo", label: "Key Finding", observation: text, detail: "Derived from your behavioural patterns — not generic heuristics.", delay: 0.15 }); }
+    return obs;
+  };
 
-@api_router.websocket("/ws/{user_id}")
-async def websocket_route(websocket: WebSocket, user_id: str):
-    await websocket_endpoint(websocket, user_id)
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
 
-@api_router.post("/notify/{user_id}")
-async def send_notification(user_id: str, notification: NotificationRequest, current_user=Depends(get_current_user)):
-    await manager.broadcast_notification(user_id, notification.dict())
-    return {"status": "notification sent"}
+  if (loading) return (
+    <BackgroundLayout>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <div style={{ textAlign: "center" }}>
+          <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.4, repeat: Infinity, ease: "linear" }}
+            style={{ width: 36, height: 36, border: "2.5px solid #ede9fe", borderTopColor: "#7c3aed", borderRadius: "50%", margin: "0 auto 14px" }}
+          />
+          <p style={{ color: "#9ca3af", fontSize: 13 }}>Loading analytics…</p>
+        </div>
+      </div>
+    </BackgroundLayout>
+  );
 
-@api_router.get("/online-users")
-async def get_online_users(current_user=Depends(get_current_user)):
-    return {"online_count": len(manager.active_connections)}
+  if (error) return (
+    <BackgroundLayout>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+        <div style={{ textAlign: "center" }}>
+          <AlertCircle color="#e11d48" size={36} style={{ margin: "0 auto 12px" }} />
+          <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", marginBottom: 8 }}>Failed to load data</h2>
+          <p style={{ color: "#6b7280", marginBottom: 20 }}>{error}</p>
+          <button onClick={fetchAllData} style={{ padding: "10px 24px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", color: "white", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>Retry</button>
+        </div>
+      </div>
+    </BackgroundLayout>
+  );
 
+  if (userState === 'new') return (
+    <BackgroundLayout>
+      <AnimatePresence>
+        {showHowItWorks && <HowItWorksModal onClose={() => setShowHowItWorks(false)} />}
+      </AnimatePresence>
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  ML ROUTES
-# ╚══════════════════════════════════════════════════════════════════════════════
+      <div style={{ minHeight: "80vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 24px", textAlign: "center" }}>
 
-@api_router.get("/ml/patterns")
-async def get_ml_patterns(current_user=Depends(get_current_user)):
-    learner  = TimevoraLearner(str(current_user["_id"]), db)
-    patterns = await learner.get_productivity_patterns()
-    return patterns
+        {/* Sparkle icon — matches original */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.7 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", stiffness: 260, damping: 20 }}
+          style={{ width: 80, height: 80, borderRadius: 24, background: "rgba(109,40,217,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 28 }}
+        >
+          <Sparkles size={36} color="#7c3aed" />
+        </motion.div>
 
-@api_router.post("/ml/predict")
-async def ml_predict(task: dict, current_user=Depends(get_current_user)):
-    learner  = TimevoraLearner(str(current_user["_id"]), db)
-    ctx      = {"hour": datetime.now().hour, "day": datetime.now().weekday(), "month": datetime.now().month}
-    accuracy = await learner.predict_accuracy(task, ctx)
-    return {"predicted_accuracy": accuracy}
+        {/* Title */}
+        <motion.h1
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.07 }}
+          style={{ fontSize: 36, fontWeight: 800, color: "#7c3aed", letterSpacing: "-0.02em", marginBottom: 14 }}
+        >
+          Welcome to TIMEVORA!
+        </motion.h1>
 
-@api_router.get("/analytics")
-async def get_analytics(days: int = 30, current_user=Depends(get_current_user)):
-    service   = AnalyticsService(db)
-    analytics = await service.get_user_analytics(str(current_user["_id"]), days)
-    return analytics
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.12 }}
+          style={{ fontSize: 15, color: "#6b7280", maxWidth: 480, lineHeight: 1.7, marginBottom: 40 }}
+        >
+          Your journey to better productivity starts here. Learn how to use all features and unlock AI-powered insights.
+        </motion.p>
 
-@api_router.post("/ml/train")
-async def ml_train(current_user=Depends(get_current_user)):
-    learner = TimevoraLearner(str(current_user["_id"]), db)
-    success = await learner.train_model()
-    return {"success": success}
+        {/* 4 feature cards — matches original grid */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.16 }}
+          style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, maxWidth: 560, width: "100%", marginBottom: 40 }}
+        >
+          {[
+            { icon: ListTodo, title: "Smart Scheduling", desc: 'Tell me your tasks naturally—"Study 2 hours, then gym"—and I\'ll create the perfect schedule.', color: "#7c3aed", bg: "#f5f3ff" },
+            { icon: Brain, title: "AI That Learns", desc: "The more you use TIMEVORA, the smarter it gets—learning your patterns to make better suggestions.", color: "#4f46e5", bg: "#eef2ff" },
+            { icon: Target, title: "Track Progress", desc: "See detailed analytics about your productivity patterns and watch yourself improve.", color: "#059669", bg: "#ecfdf5" },
+            { icon: TrendingUp, title: "Weekly Insights", desc: "Get personalized recommendations to optimize your time and boost productivity.", color: "#d97706", bg: "#fffbeb" },
+          ].map((card, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.18 + i * 0.05 }}
+              style={{ background: "white", borderRadius: 16, padding: "20px", textAlign: "left", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", border: "1px solid #f0f0f0" }}
+            >
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: card.bg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                <card.icon size={18} color={card.color} />
+              </div>
+              <p style={{ fontWeight: 700, fontSize: 14, color: "var(--text-primary)", marginBottom: 6 }}>{card.title}</p>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.6 }}>{card.desc}</p>
+            </motion.div>
+          ))}
+        </motion.div>
 
+        {/* Main CTA — "How does Performance work?" replaces "Add Your First Task" */}
+        <motion.button
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.38 }}
+          whileHover={{ scale: 1.04, y: -2 }}
+          whileTap={{ scale: 0.97 }}
+          onClick={() => setShowHowItWorks(true)}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 10,
+            padding: "15px 32px",
+            background: "linear-gradient(135deg, #7c3aed, #4f46e5)",
+            border: "none", borderRadius: 16, cursor: "pointer",
+            color: "white", fontSize: 15, fontWeight: 700,
+            boxShadow: "0 8px 28px rgba(109,40,217,0.38)",
+          }}
+        >
+          <HelpCircle size={17} /> How does Performance work? →
+        </motion.button>
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  SHARED HELPER FUNCTIONS
-# ╚══════════════════════════════════════════════════════════════════════════════
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.44 }}
+          style={{ fontSize: 12, color: "#9ca3af", marginTop: 14 }}
+        >
+          Takes less than 2 minutes to get started
+        </motion.p>
 
-async def get_user_accuracy(user_id: str) -> dict:
-    records = []
-    async for r in task_history.find({"user_id": user_id}):
-        records.append(r)
-    if not records:
-        return {"easy": 1.0, "medium": 1.0, "hard": 1.0}
-    buckets: dict = {"easy": [], "medium": [], "hard": []}
-    for r in records:
-        ai_time = r.get("aiTime", 0)
-        actual  = r.get("actualTime", 0)
-        diff    = r.get("difficulty", "medium")
-        if ai_time > 0 and actual > 0 and diff in buckets:
-            buckets[diff].append(actual / ai_time)
-    return {k: round(sum(v) / len(v), 2) if v else 1.0 for k, v in buckets.items()}
+      </div>
+    </BackgroundLayout>
+  );
 
+  const focusObs = buildFocusObs();
+  const plannerObs = buildPlannerObs();
+  const aiPlannerObs = buildAIPlannerObs();
+  const overallObs = buildOverallObs();
+  const totalFocusHrs = Math.floor((focusStats?.totalMinutes || 0) / 60);
+  const aiAccuracyPct = feedbackSummary?.avg_accuracy ? Math.round(feedbackSummary.avg_accuracy * 100) : null;
+  const predictionFitDisplay = aiAccuracyPct
+    ? aiAccuracyPct > 105
+      ? `${aiAccuracyPct - 100}% slower`
+      : aiAccuracyPct < 95
+      ? `${100 - aiAccuracyPct}% faster`
+      : `On track`
+    : "—";
+  const predictionFitSub = aiAccuracyPct
+    ? aiAccuracyPct > 105
+      ? "you run over your time estimates"
+      : aiAccuracyPct < 95
+      ? "you finish ahead of schedule"
+      : "your estimates are accurate"
+    : "AI accuracy";
 
-async def get_category_accuracy(user_id: str) -> dict:
-    records = []
-    async for r in task_history.find({"user_id": user_id}):
-        records.append(r)
-    if not records:
-        return {}
-    buckets: dict = {}
-    for r in records:
-        ai_time  = r.get("aiTime", 0)
-        actual   = r.get("actualTime", 0)
-        category = r.get("category", "general")
-        if ai_time > 0 and actual > 0:
-            if category not in buckets:
-                buckets[category] = []
-            buckets[category].append(actual / ai_time)
-    return {k: round(sum(v) / len(v), 3) if v else 1.0 for k, v in buckets.items() if len(v) >= 2}
+  return (
+    <BackgroundLayout>
+      <AnimatePresence>
+        {showGuidanceChat && (
+          <AIGuidanceChat userContext={{ taskCount, patterns, chronotype, feedbackSummary }} onClose={() => setShowGuidanceChat(false)} />
+        )}
+        {showHowItWorks && <HowItWorksModal onClose={() => setShowHowItWorks(false)} />}
+      </AnimatePresence>
 
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ maxWidth: 1020, margin: "0 auto", padding: "48px 24px 72px" }}>
 
-async def calculate_user_streak(user_id: str) -> int:
-    try:
-        plans  = await daily_plans.find({"user_id": user_id}).sort("date", -1).limit(30).to_list(30)
-        streak = 0
-        today  = datetime.now().date()
-        for plan in plans:
-            try:
-                plan_date = datetime.fromisoformat(plan["date"]).date()
-            except (ValueError, KeyError):
-                continue
-            if plan_date == today - timedelta(days=streak):
-                if len(plan.get("optimizedTasks", plan.get("schedule", []))) > 0:
-                    streak += 1
-                else:
-                    break
-            else:
-                break
-        return streak
-    except Exception as e:
-        logger.error(f"calculate_user_streak error: {e}")
-        return 0
+        {/* ── Header ─────────────────────────────────────────── */}
+        <motion.div initial={{ opacity: 0, y: -14 }} animate={{ opacity: 1, y: 0 }} style={{ marginBottom: 40 }}>
 
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 13px", background: "rgba(109,40,217,0.08)", border: "1px solid rgba(109,40,217,0.18)", borderRadius: 100, marginBottom: 16 }}>
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#7c3aed", display: "inline-block" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", color: "#7c3aed", textTransform: "uppercase" }}>Live Analysis</span>
+          </div>
 
-def _fmt_time(hour: Optional[float]) -> str:
-    if hour is None:
-        return ""
-    h = int(hour)
-    m = int((hour - h) * 60)
-    period  = "AM" if h < 12 else "PM"
-    display = h % 12 or 12
-    return f"{display}:{m:02d} {period}"
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 20, marginBottom: 28 }}>
+            <div>
+              <h1 style={{ fontSize: 38, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.035em", lineHeight: 1.1, margin: 0 }}>
+                Your Performance,<br />
+                <span style={{ background: "linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", WebkitTextFillColor: "transparent", color: "transparent", display: "inline-block" }}>Decoded</span>
+              </h1>
+              <p style={{ color: "var(--text-secondary)", marginTop: 12, fontSize: 14, maxWidth: 460, lineHeight: 1.65 }}>
+                Every session, task, and plan builds a model calibrated to your specific patterns — not population averages.
+              </p>
+            </div>
 
-format_time_decimal = _fmt_time
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <div style={{ position: "relative" }}>
+                <select value={timeRange} onChange={e => setTimeRange(parseInt(e.target.value))} style={{ appearance: "none", padding: "9px 34px 9px 14px", borderRadius: 10, fontSize: 13, background: "var(--card-bg)", border: "1px solid var(--card-border)", color: "var(--text-primary)", cursor: "pointer", outline: "none", fontWeight: 500, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                  <option value={7}>Last 7 days</option>
+                  <option value={30}>Last 30 days</option>
+                  <option value={90}>Last 90 days</option>
+                </select>
+                <ChevronDown size={13} color="#9ca3af" style={{ position: "absolute", right: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} />
+              </div>
 
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowGuidanceChat(true)} style={{ padding: "9px 16px", background: "linear-gradient(135deg, #7c3aed, #4f46e5)", border: "none", borderRadius: 10, color: "white", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 2px 10px rgba(109,40,217,0.3)" }}>
+                <MessageCircle size={14} /> AI Coach
+              </motion.button>
 
-def _timevora_ai_simple(planning_data: dict) -> str:
-    overloaded = planning_data.get("overloaded", False)
-    hard_tasks = [t["name"] for t in planning_data.get("tasks", []) if t.get("difficulty") == "hard"]
-    total      = planning_data.get("totalLoad", 0)
-    parts = []
-    if overloaded:
-        parts.append("Your workload is too heavy for one day. Consider moving some tasks to tomorrow.")
-    if hard_tasks:
-        parts.append(f"Schedule hard tasks like {', '.join(hard_tasks[:2])} in the morning when your energy is highest.")
-    if total < 3 and not overloaded:
-        parts.append("You can take on more today if you feel productive.")
-    return " ".join(parts) or "Your schedule looks balanced and realistic. Great job planning today!"
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={() => setShowHowItWorks(true)} style={{ padding: "9px 16px", background: "var(--card-bg)", border: "1px solid #ddd6fe", borderRadius: 10, color: "var(--accent)", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <HelpCircle size={14} /> How it works
+              </motion.button>
 
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={trainModel} disabled={training || taskCount < 5} style={{ padding: "9px 16px", background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 10, color: taskCount < 5 ? "var(--text-muted)" : "var(--text-primary)", fontSize: 13, fontWeight: 500, cursor: taskCount < 5 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <Brain size={14} className={training ? "animate-pulse" : ""} />
+                {training ? "Training…" : taskCount < 5 ? `Need ${5 - taskCount} more` : "Retrain"}
+              </motion.button>
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  LEGACY ENDPOINTS
-# ╚══════════════════════════════════════════════════════════════════════════════
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={exportData} style={{ padding: "9px 14px", background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 10, color: "var(--text-secondary)", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <Download size={14} /> Export
+              </motion.button>
 
-@api_router.post("/ai-insight")
-async def ai_insight(planning: AIPlanningData, current_user=Depends(get_current_user)):
-    accuracy   = await get_user_accuracy(str(current_user["_id"]))
-    ai_message = _timevora_ai_simple(planning.model_dump())
-    return {"message": ai_message}
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={fetchAllData} style={{ padding: "9px 14px", background: "white", border: "1px solid #e5e7eb", borderRadius: 10, color: "#6b7280", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 7, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <RefreshCw size={14} /> Refresh
+              </motion.button>
+            </div>
+          </div>
 
-@api_router.post("/analyze-day")
-async def analyze_day(data: AnalyzeDayRequest, current_user=Depends(get_current_user)):
-    difficulty_factor = {"easy": 1.1, "medium": 1.35, "hard": 1.9}
-    priority_factor   = {"low": 1.0,  "medium": 1.3,  "high": 1.7}
-    accuracy = await get_user_accuracy(str(current_user["_id"]))
-    enriched = []
-    for t in data.tasks:
-        base_time  = t.time * difficulty_factor.get(t.difficulty, 1.35)
-        adjustment = accuracy.get(t.difficulty, 1.0)
-        ai_time    = round(base_time * adjustment, 1)
-        score      = difficulty_factor.get(t.difficulty, 1.35) * priority_factor.get(t.priority, 1.3) * t.time
-        enriched.append({"id": str(uuid.uuid4()), "name": t.name, "priority": t.priority, "difficulty": t.difficulty, "userTime": t.time, "aiTime": ai_time, "score": score})
+          {/* KPI strip */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            {[
+              { value: `${totalFocusHrs}h`, label: "Focus Hours", sub: "lifetime total", accentColor: "#d97706" },
+              { value: analytics?.overview?.completed || 0, label: "Tasks Completed", sub: `of ${taskCount} logged`, accentColor: "#059669" },
+              { value: plannerStats?.planCount || 0, label: "AI Schedules", sub: "generated", accentColor: "#7c3aed" },
+              { value: predictionFitDisplay, label: "Prediction Fit", sub: predictionFitSub, accentColor: "#0284c7" },
+            ].map((s, i) => <StatTile key={i} {...s} />)}
+          </div>
+        </motion.div>
 
-    ordered  = sorted(enriched, key=lambda x: x["score"], reverse=True)
-    hour     = 9
-    schedule = []
-    for task in ordered:
-        remaining = max(1, int(round(task["aiTime"])))
-        while remaining > 0:
-            schedule.append({"time": f"{hour}:00 - {hour + 1}:00", "task": task["name"], "duration": 1, "priority": task["priority"]})
-            hour += 1
-            remaining -= 1
+        {/* Growing user prompt */}
+        {userState !== 'active' && !hasDismissedPrompt && (
+          <div style={{ marginBottom: 28 }}>
+            <GrowingUserPrompt taskCount={taskCount} onDismiss={() => setHasDismissedPrompt(true)} />
+          </div>
+        )}
 
-    today_str = date.today().isoformat()
-    await daily_plans.update_one({"user_id": str(current_user["_id"]), "date": today_str}, {"$set": {"optimizedTasks": ordered, "schedule": schedule, "created_at": datetime.now(timezone.utc)}}, upsert=True)
-    await manager.broadcast_to_user(str(current_user["_id"]), {"type": "schedule:ready", "date": today_str, "task_count": len(ordered), "timestamp": datetime.now(timezone.utc).isoformat()})
-    return {"optimizedTasks": ordered, "schedule": schedule}
+        {/* ── Analysis Sections ─────────────────────────────── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
+          <AnalysisPanel title="Focus Sessions" subtitle="What your timer data reveals about your concentration patterns" icon={Flame} barColor="linear-gradient(135deg, #f59e0b, #ef4444)">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              {focusObs.map((obs, i) => <InsightCard key={i} {...obs} />)}
+            </div>
+          </AnalysisPanel>
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  STARTUP
-# ╚══════════════════════════════════════════════════════════════════════════════
+          <AnalysisPanel title="Task Planner" subtitle="Patterns extracted from your planning and execution behaviour" icon={BookOpen} barColor="linear-gradient(135deg, #7c3aed, #4f46e5)">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginBottom: 20 }}>
+              {plannerObs.map((obs, i) => <InsightCard key={i} {...obs} />)}
+            </div>
+            {taskCount >= 5 && analytics?.daily && analytics.daily.length > 0 && (
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 14 }}>Completion curve — last 14 days</p>
+                <ResponsiveContainer width="100%" height={155}>
+                  <AreaChart data={analytics.daily.slice(-14)}>
+                    <defs>
+                      <linearGradient id="plannerGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#7c3aed" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                    <XAxis dataKey="date" stroke="#e5e7eb" tick={{ fontSize: 10, fill: "#9ca3af" }} />
+                    <YAxis stroke="#e5e7eb" tick={{ fontSize: 10, fill: "#9ca3af" }} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Area type="monotone" dataKey="completed" name="Completed" stroke="#7c3aed" fill="url(#plannerGrad)" strokeWidth={2} dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {taskCount >= 5 && Object.keys(categoryAccuracy).length > 0 && (
+              <div style={{ marginTop: 22 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 14 }}>Accuracy by category</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {Object.entries(categoryAccuracy).map(([cat, acc]) => {
+                    const pct = Math.round(parseFloat(acc) * 100);
+                    const color = pct >= 85 ? "#059669" : pct >= 70 ? "#d97706" : "#e11d48";
+                    return (
+                      <div key={cat}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                          <span style={{ fontSize: 12, color: "#6b7280", textTransform: "capitalize" }}>{cat}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color }}>{pct}%</span>
+                        </div>
+                        <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+                          <motion.div initial={{ width: 0 }} animate={{ width: `${pct}%` }} transition={{ duration: 0.8 }} style={{ height: "100%", background: color, borderRadius: 4 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </AnalysisPanel>
 
-@app.on_event("startup")
-async def _create_indexes():
-    try:
-        await task_history.create_index([("user_id", 1), ("created_at", -1)])
-        await daily_plans.create_index( [("user_id", 1), ("date",       -1)])
-        await tasks_col.create_index(   [("user_id", 1), ("completed",   1)])
-        await priority_feedback.create_index([("user_id", 1), ("created_at", -1)])
-        await task_history.create_index([("user_id", 1), ("category",   1)])
-        await task_history.create_index([("user_id", 1), ("difficulty", 1)])
-        await dismissed_tasks.create_index([("user_id", 1), ("task_id", 1)], unique=True)
-        await tasks_col.create_index([("user_id", 1), ("status",     1)])
-        await tasks_col.create_index([("user_id", 1), ("is_deleted", 1)])
-        logger.info("✅ MongoDB indexes ensured")
-    except Exception as e:
-        logger.warning(f"Index creation warning: {e}")
+          <AnalysisPanel title="AI Planner" subtitle="What the intelligent scheduler has learned about your work style" icon={Bot} barColor="linear-gradient(135deg, #0ea5e9, #4f46e5)">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginBottom: 20 }}>
+              {aiPlannerObs.map((obs, i) => <InsightCard key={i} {...obs} />)}
+            </div>
+            {taskCount >= 5 && chartData.length > 0 && (
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 14 }}>Prediction accuracy by difficulty</p>
+                <ResponsiveContainer width="100%" height={150}>
+                  <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                    <XAxis dataKey="difficulty" stroke="#e5e7eb" tick={{ fontSize: 11, fill: "#9ca3af" }} />
+                    <YAxis tickFormatter={v => `${v}%`} stroke="#e5e7eb" tick={{ fontSize: 10, fill: "#9ca3af" }} />
+                    <Tooltip content={<ChartTooltip />} />
+                    <Bar dataKey="accuracy" name="Accuracy" fill="#4f46e5" radius={[5, 5, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {/* ── Chronotype Card — prominent, personalised ── */}
+            {chronotype && chronotype.ready !== false && taskCount >= 5 ? (
+              <div style={{
+                marginTop: 20,
+                borderRadius: 16,
+                overflow: "hidden",
+                border: "1px solid #e0e7ff",
+                boxShadow: "0 4px 24px rgba(99,102,241,0.08)",
+              }}>
+                {/* Header strip */}
+                <div style={{
+                  background: "linear-gradient(135deg, #4f46e5, #7c3aed)",
+                  padding: "14px 20px",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <span style={{ fontSize: 32 }}>{chronotype.emoji || "🧠"}</span>
+                  <div>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.7)", fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>
+                      Your Chronotype
+                    </p>
+                    <p style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>
+                      {chronotype.type || "Analyzing…"}
+                    </p>
+                  </div>
+                  <div style={{ marginLeft: "auto", textAlign: "right" }}>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginBottom: 3 }}>Peak window</p>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: "#a5f3fc", textTransform: "capitalize", background: "rgba(255,255,255,0.15)", padding: "3px 10px", borderRadius: 8 }}>
+                      {chronotype.peak || chronotype.peak_slot || "—"}
+                    </p>
+                  </div>
+                </div>
+                {/* Body */}
+                <div style={{ background: "#fafafe", padding: "14px 20px", display: "flex", flexWrap: "wrap", gap: 16, alignItems: "center" }}>
+                  <p style={{ fontSize: 13, color: "#4b5563", lineHeight: 1.6, flex: 1, minWidth: 220 }}>
+                    {chronotype.description || "Model is learning your energy pattern."}
+                  </p>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ background: "#ede9fe", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
+                      <p style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>Best for</p>
+                      <p style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600, marginTop: 2 }}>Deep work</p>
+                    </div>
+                    <div style={{ background: "#ecfdf5", borderRadius: 10, padding: "8px 14px", textAlign: "center" }}>
+                      <p style={{ fontSize: 10, color: "#059669", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em" }}>AI schedules</p>
+                      <p style={{ fontSize: 12, color: "var(--text-primary)", fontWeight: 600, marginTop: 2, textTransform: "capitalize" }}>Around your {chronotype.peak_slot || "peak"}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : taskCount < 5 ? (
+              <div style={{ marginTop: 20, borderRadius: 12, padding: "14px 18px", background: "#f5f3ff", border: "1px dashed #c4b5fd", display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 24 }}>🧠</span>
+                <div>
+                  <p style={{ fontWeight: 700, color: "#4c1d95", fontSize: 13 }}>Chronotype locked</p>
+                  <p style={{ color: "#7c3aed", fontSize: 12, marginTop: 2 }}>Complete {5 - taskCount} more tasks to discover your chronotype and unlock personalised scheduling.</p>
+                </div>
+              </div>
+            ) : null}
 
+            {/* AI-generated recommendations from analyzer */}
+            {aiRecommendations.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 12 }}>
+                  Personalised Recommendations
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {aiRecommendations.map((rec, i) => (
+                    <div key={i} style={{ padding: "10px 14px", borderRadius: 10, background: "var(--card-bg)", border: "1px solid var(--card-border)", fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5 }}>
+                      {rec}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </AnalysisPanel>
 
-# ╔══════════════════════════════════════════════════════════════════════════════
-# ║  ROUTER + ENTRY POINT
-# ╚══════════════════════════════════════════════════════════════════════════════
+          <AnalysisPanel title="Full Picture" subtitle="Holistic synthesis across all productivity dimensions" icon={Layers} barColor="linear-gradient(135deg, #10b981, #059669)">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginBottom: 24 }}>
+              {overallObs.map((obs, i) => <InsightCard key={i} {...obs} />)}
+            </div>
+            {taskCount >= 5 && analytics?.daily && analytics.daily.length > 0 && (
+              <div>
+                <p style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 14 }}>Weekly breakdown</p>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid #f3f4f6" }}>
+                        {["Date", "Tasks", "Done", "Focus", "Rate"].map(h => (
+                          <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.07em" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.daily.slice(-7).map((day, i) => {
+                        const safeFocus = typeof day.focus_hours === 'number' && !isNaN(day.focus_hours) ? day.focus_hours : 0;
+                        const total = day.total || 0; const done = day.completed || 0;
+                        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                        const rateColor = pct >= 80 ? "#059669" : pct >= 60 ? "#d97706" : "#e11d48";
+                        return (
+                          <tr key={i} style={{ borderBottom: "1px solid #f9fafb" }}>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "#6b7280" }}>{day.date ? new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A'}</td>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "var(--text-primary)" }}>{total}</td>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "var(--text-primary)" }}>{done}</td>
+                            <td style={{ padding: "11px 12px", fontSize: 13, color: "#6b7280" }}>{safeFocus.toFixed(1)}h</td>
+                            <td style={{ padding: "11px 12px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div style={{ width: 60, height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+                                  <div style={{ width: `${pct}%`, height: "100%", background: rateColor, borderRadius: 4 }} />
+                                </div>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: rateColor }}>{pct}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </AnalysisPanel>
+        </div>
 
-app.include_router(api_router)
+        {/* ── Footer CTA ─────────────────────────────────────── */}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }}
+          style={{ marginTop: 44, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+          {[
+            { label: "Start Focus Session", icon: Flame, action: () => navigate('/focus'), bg: "linear-gradient(135deg, #f59e0b, #ef4444)" },
+            { label: "Open Planner", icon: BookOpen, action: () => navigate('/unified-planner'), bg: "linear-gradient(135deg, #7c3aed, #4f46e5)" },
+            { label: "AI Planner", icon: Bot, action: () => navigate('/ai-planner'), bg: "linear-gradient(135deg, #0ea5e9, #4f46e5)" },
+          ].map((btn, i) => (
+            <motion.button key={i} whileHover={{ scale: 1.03, y: -1 }} whileTap={{ scale: 0.97 }} onClick={btn.action}
+              style={{ padding: "12px 22px", background: btn.bg, border: "none", borderRadius: 12, color: "white", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 16px rgba(109,40,217,0.2)" }}>
+              <btn.icon size={15} /> {btn.label}
+            </motion.button>
+          ))}
+        </motion.div>
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    logger.info(f"Starting Timevora API on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+      </motion.div>
+    </BackgroundLayout>
+  );
+}
