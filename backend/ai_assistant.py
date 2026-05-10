@@ -3147,6 +3147,37 @@ async def get_guidance_response(
     except Exception:
         pass
 
+    # 10. Gap 3 Fix: Pull full analyzer profile — chronotype, accuracy trend,
+    #     best day, time-slot performance. This is richer than what we compute
+    #     above and gives the AI Coach full context.
+    chronotype_type   = ""
+    chronotype_desc   = ""
+    accuracy_trend    = ""
+    best_day          = ""
+    slot_performance  = {}
+    try:
+        from ai.analyzer import ProductivityAnalyzer
+        _analyzer = ProductivityAnalyzer(user_id, db)
+        _profile  = await _analyzer.get_full_profile()
+
+        # Chronotype
+        _energy = _profile.get("energy_patterns", {})
+        _chrono = _analyzer.get_chronotype(_energy)
+        if _chrono.get("ready"):
+            chronotype_type = _chrono.get("type", "")
+            chronotype_desc = _chrono.get("description", "")
+
+        # Accuracy trend
+        accuracy_trend = _profile.get("accuracy_trend", "")
+
+        # Best day
+        best_day = _profile.get("best_day", "")
+
+        # Time slot performance
+        slot_performance = _profile.get("time_slot_performance", {})
+    except Exception as _e:
+        logger.warning(f"[Guidance] Could not load full analyzer profile: {_e}")
+
     # ── Build rich context string for Gemini ──────────────────────────────────
     if not context_used:
         ctx_str = "Brand new user — no data yet. Give warm, encouraging, general productivity advice."
@@ -3199,6 +3230,14 @@ AI PREDICTION ACCURACY
 PEAK HOURS
 - Most productive hours: {peak_str}
 
+CHRONOTYPE & ENERGY PROFILE
+- Chronotype: {chronotype_type if chronotype_type else "not yet determined (need more data)"}
+- Description: {chronotype_desc if chronotype_desc else "N/A"}
+- Best day of week: {best_day if best_day else "not yet determined"}
+- Accuracy trend: {accuracy_trend if accuracy_trend else "insufficient data"}
+{"- Accuracy trend note: IMPROVING means user is getting better at estimating time." if accuracy_trend == "improving" else ""}
+{"- Accuracy trend note: DECLINING means user's estimates are getting less accurate — worth flagging." if accuracy_trend == "declining" else ""}
+
 PERFORMANCE INDEX
 - Composite score: {performance_index}/100
 {"- Missing: Focus sessions (0 logged) — biggest gap to close." if focus_sessions == 0 else ""}
@@ -3213,6 +3252,9 @@ PERFORMANCE INDEX
             "prediction_accuracy": prediction_accuracy,
             "peak_hours": peak_hours,
             "performance_index": performance_index,
+            "chronotype": chronotype_type,
+            "accuracy_trend": accuracy_trend,
+            "best_day": best_day,
         }
 
     # ── For snapshot requests, return data only (no LLM call) ──────────────
