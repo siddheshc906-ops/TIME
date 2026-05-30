@@ -48,6 +48,77 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import httpx
+
+# ── Email verification helper ─────────────────────────────────────────────────
+async def send_verification_email(to_email: str, token: str):
+    frontend_url = os.environ.get("FRONTEND_URL", "https://timevora-delta.vercel.app")
+    verify_url   = f"{os.environ.get('BACKEND_URL', 'https://time-8.onrender.com').rstrip('/')}/api/verify?token={token}"
+
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+
+    if not smtp_user or not smtp_pass:
+        logger.warning("SMTP_USER or SMTP_PASS not set — skipping verification email")
+        return
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Verify your Timevora account"
+    msg["From"]    = f"Timevora <{smtp_user}>"
+    msg["To"]      = to_email
+
+    html = f"""
+    <div style='font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f9ff;border-radius:16px'>
+      <h2 style='color:#7c3aed'>Welcome to Timevora ✦</h2>
+      <p style='color:#444'>You are one step away. Click the button below to verify your email and start planning smarter.</p>
+      <a href='{verify_url}' style='display:inline-block;margin:20px 0;padding:14px 28px;background:#7c3aed;color:#fff;border-radius:10px;text-decoration:none;font-weight:600'>
+        Verify my account
+      </a>
+      <p style='color:#888;font-size:13px'>This link expires in 24 hours. If you did not sign up, ignore this email.</p>
+    </div>
+    """
+    msg.attach(MIMEText(html, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(smtp_user, to_email, msg.as_string())
+    logger.info(f"Verification email sent to {to_email}")
+
+# ── Fast2SMS OTP helper (free tier) ──────────────────────────────────────────
+async def send_otp_fast2sms(phone: str, otp: str) -> bool:
+    api_key = os.environ.get("FAST2SMS_API_KEY", "")
+    if not api_key:
+        logger.warning("FAST2SMS_API_KEY not set — OTP not sent")
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://www.fast2sms.com/dev/bulkV2",
+                headers={"authorization": api_key},
+                json={
+                    "variables_values": otp,
+                    "route": "otp",
+                    "numbers": phone,
+                }
+            )
+        data = resp.json()
+        if data.get("return"):
+            logger.info(f"OTP sent via Fast2SMS to {phone}")
+            return True
+        logger.error(f"Fast2SMS error: {data}")
+        return False
+    except Exception as e:
+        logger.error(f"Fast2SMS exception: {e}")
+        return False
+
+
 try:
     mongo_url = os.environ.get("MONGO_URL")
     if not mongo_url:
@@ -320,13 +391,21 @@ async def get_status_checks():
 async def signup(request: Request, user: SignupRequest):
     if await users.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email already registered")
+    verification_token = str(uuid.uuid4())
     await users.insert_one({
         "email": user.email,
         "hashed_password": hash_password(user.password),
-        "is_verified": True,
+        "is_verified": False,
+        "verification_token": verification_token,
         "created_at": datetime.now(timezone.utc),
     })
-    return {"message": "Signup successful! You can now log in."}
+    # Send verification email
+    try:
+        await send_verification_email(user.email, verification_token)
+    except Exception as e:
+        logger.error(f"Failed to send verification email: {e}")
+        # Don't block signup if email fails — user can request resend
+    return {"message": "Account created! Please check your email to verify your account before logging in."}
 
 @api_router.post("/login")
 @limiter.limit("5/minute")  # max 5 login attempts per minute per IP — prevents brute force
@@ -334,17 +413,46 @@ async def login(request: Request, user: LoginRequest):
     db_user = await users.find_one({"email": user.email})
     if not db_user or not verify_password(user.password, db_user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Invalid credentials")
+    if not db_user.get("is_verified", False):
+        raise HTTPException(status_code=403, detail="Please verify your email before logging in. Check your inbox for the verification link.")
     token = create_access_token({"sub": db_user["email"], "user_id": str(db_user["_id"]), "email": db_user["email"]})
     return {"access_token": token, "token_type": "bearer"}
 
 @api_router.get("/verify")
 async def verify_email(token: str):
+    logger.info(f"Verify attempt with token: {token[:8]}...")
     user = await users.find_one({"verification_token": token})
     if not user:
-        raise HTTPException(status_code=400, detail="Token not found")
+        # Also check if already verified with this token cleared
+        logger.warning(f"Token not found in DB: {token[:8]}...")
+        frontend_url = os.environ.get("FRONTEND_URL", "https://timevora-delta.vercel.app")
+        return RedirectResponse(url=f"{frontend_url}/login?error=invalid_token", status_code=302)
     await users.update_one({"_id": user["_id"]}, {"$set": {"is_verified": True, "verification_token": None}})
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
-    return RedirectResponse(url=f"{frontend_url}/login")
+    logger.info(f"User verified: {user.get('email')}")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://timevora-delta.vercel.app")
+    return RedirectResponse(url=f"{frontend_url}/login?verified=1", status_code=302)
+
+
+@api_router.post("/resend-verification")
+@limiter.limit("3/minute")
+async def resend_verification(request: Request, body: dict):
+    email = body.get("email", "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    user = await users.find_one({"email": email})
+    if not user:
+        # Don't reveal whether email exists
+        return {"message": "If this email is registered, a verification link has been sent."}
+    if user.get("is_verified"):
+        return {"message": "This account is already verified. You can log in."}
+    token = user.get("verification_token") or str(uuid.uuid4())
+    await users.update_one({"_id": user["_id"]}, {"$set": {"verification_token": token}})
+    try:
+        await send_verification_email(email, token)
+    except Exception as e:
+        logger.error(f"Resend verification failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email. Try again later.")
+    return {"message": "Verification email sent! Check your inbox."}
 
 
 # ╔══════════════════════════════════════════════════════════════════════════════
@@ -412,9 +520,9 @@ async def otp_send(request: Request, req: OtpSendRequest):
         upsert=True
     )
 
-    sent = await send_otp_msg91(intl_phone, otp)
+    sent = await send_otp_fast2sms(phone, otp)
     if not sent:
-        raise HTTPException(status_code=500, detail="Failed to send OTP. Try again.")
+        raise HTTPException(status_code=500, detail="Failed to send OTP. Please check your number or try again.")
 
     return {"message": f"OTP sent to +91 {phone}"}
 
