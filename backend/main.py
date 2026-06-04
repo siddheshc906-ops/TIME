@@ -48,48 +48,50 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+
+
 import httpx
 
 # ── Email verification helper ─────────────────────────────────────────────────
+
+import resend
+
+resend.api_key = os.environ.get("RESEND_API_KEY")
+
 async def send_verification_email(to_email: str, token: str):
-    frontend_url = os.environ.get("FRONTEND_URL", "https://timevora-delta.vercel.app")
-    verify_url   = f"{os.environ.get('BACKEND_URL', 'https://time-8.onrender.com').rstrip('/')}/api/verify?token={token}"
+    verify_url = f"{os.environ.get('BACKEND_URL', 'https://time-8.onrender.com').rstrip('/')}/api/verify?token={token}"
 
-    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_user = os.environ.get("SMTP_USER", "")
-    smtp_pass = os.environ.get("SMTP_PASS", "")
+    params = {
+        "from": "Timevora <noreply@timevora.app>",
+        "to": [to_email],
+        "subject": "Verify your Timevora account",
+        "html": f"""
+        <div style='font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f9ff;border-radius:16px'>
+          <h2 style='color:#7c3aed'>Welcome to Timevora ✦</h2>
+          <p style='color:#444'>Click below to verify your email.</p>
 
-    if not smtp_user or not smtp_pass:
-        logger.warning("SMTP_USER or SMTP_PASS not set — skipping verification email")
-        return
+          <a href='{verify_url}'
+             style='display:inline-block;
+                    margin:20px 0;
+                    padding:14px 28px;
+                    background:#7c3aed;
+                    color:#fff;
+                    border-radius:10px;
+                    text-decoration:none;
+                    font-weight:600'>
+             Verify my account
+          </a>
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "Verify your Timevora account"
-    msg["From"]    = f"Timevora <{smtp_user}>"
-    msg["To"]      = to_email
+          <p style='color:#888;font-size:13px'>
+            This link expires in 24 hours.
+          </p>
+        </div>
+        """
+    }
 
-    html = f"""
-    <div style='font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f9ff;border-radius:16px'>
-      <h2 style='color:#7c3aed'>Welcome to Timevora ✦</h2>
-      <p style='color:#444'>You are one step away. Click the button below to verify your email and start planning smarter.</p>
-      <a href='{verify_url}' style='display:inline-block;margin:20px 0;padding:14px 28px;background:#7c3aed;color:#fff;border-radius:10px;text-decoration:none;font-weight:600'>
-        Verify my account
-      </a>
-      <p style='color:#888;font-size:13px'>This link expires in 24 hours. If you did not sign up, ignore this email.</p>
-    </div>
-    """
-    msg.attach(MIMEText(html, "html"))
-
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.ehlo()
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(smtp_user, to_email, msg.as_string())
+    resend.Emails.send(params)
     logger.info(f"Verification email sent to {to_email}")
+
 
 # ── Fast2SMS OTP helper (free tier) ──────────────────────────────────────────
 async def send_otp_fast2sms(phone: str, otp: str) -> bool:
