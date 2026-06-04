@@ -33,3 +33,4 @@ slowapi==0.1.9
 google-auth>=2.29.0
 google-genai>=1.0.0
 groq
+resend==2.30.1
